@@ -80,7 +80,7 @@ func main() {
 	case "web":
 		fs := flag.NewFlagSet("web", flag.ExitOnError)
 		cfgPath := fs.String("config", "configs/config.yaml", "config path (YAML)")
-		addr := fs.String("addr", "127.0.0.1:8080", "listen address")
+		addr := fs.String("addr", "127.0.0.1:8000", "listen address")
 		_ = fs.Parse(os.Args[2:])
 
 		mgr, err := runtimecfg.Load(*cfgPath)
@@ -113,7 +113,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  aof init-db -config configs/config.yaml")
 	fmt.Fprintln(os.Stderr, "  aof rt      -config configs/config.yaml")
 	fmt.Fprintln(os.Stderr, "  aof daily   -config configs/config.yaml [-date YYYY-MM-DD]")
-	fmt.Fprintln(os.Stderr, "  aof web     -config configs/config.yaml [-addr 127.0.0.1:8080]")
+	fmt.Fprintln(os.Stderr, "  aof web     -config configs/config.yaml [-addr 127.0.0.1:8000]")
 }
 
 func fatalIf(err error) {
@@ -121,4 +121,3 @@ func fatalIf(err error) {
 		log.Fatal(err)
 	}
 }
-

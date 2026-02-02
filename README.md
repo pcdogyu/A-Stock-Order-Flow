@@ -41,7 +41,7 @@ go build -o .\\bin\\aof.exe .\\cmd\\aof
 Or run a web UI with settings (also runs realtime collector in the same process):
 
 ```powershell
-.\bin\aof.exe web -config configs/config.yaml -addr 127.0.0.1:8080
+.\bin\aof.exe web -config configs/config.yaml -addr 127.0.0.1:8000
 ```
 
 5) Run daily snapshot:
