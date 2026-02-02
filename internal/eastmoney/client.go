@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,14 @@ type Client struct {
 func NewClient() *Client {
 	return &Client{
 		hc: &http.Client{
+			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     30 * time.Second,
+				// Some public endpoints occasionally misbehave with HTTP/2 and/or keep-alives.
+				ForceAttemptHTTP2: false,
+			},
 			Timeout: 20 * time.Second,
 		},
 	}
@@ -184,25 +193,68 @@ func (c *Client) MarginLatestByCode(ctx context.Context, code string) (MarginDai
 }
 
 func (c *Client) getJSON(ctx context.Context, u string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AOFCollector/1.0)")
-	req.Header.Set("Accept", "application/json,text/plain,*/*")
+	var lastErr error
+	backoff := 200 * time.Millisecond
 
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+				backoff *= 3
+			}
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("http %d: %s", resp.StatusCode, string(b))
-	}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AOFCollector/1.0)")
+		req.Header.Set("Accept", "application/json,text/plain,*/*")
+		req.Header.Set("Connection", "close")
 
-	dec := json.NewDecoder(resp.Body)
-	dec.UseNumber()
-	return dec.Decode(out)
+		resp, err := c.hc.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var attemptErr error
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			attemptErr = fmt.Errorf("http %d: %s", resp.StatusCode, string(b))
+		} else {
+			dec := json.NewDecoder(resp.Body)
+			dec.UseNumber()
+			attemptErr = dec.Decode(out)
+		}
+		_ = resp.Body.Close()
+
+		if attemptErr == nil {
+			return nil
+		}
+
+		// Retry on common transient codes.
+		if resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504 {
+			lastErr = attemptErr
+			continue
+		}
+		// For other status codes, don't retry. For decode/network errors we do retry.
+		if resp.StatusCode != http.StatusOK {
+			return attemptErr
+		}
+		lastErr = attemptErr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("unknown error")
+	}
+	// Some Eastmoney endpoints (notably clist/get) may terminate Go TLS handshakes (EOF).
+	// On Windows, fall back to PowerShell Invoke-WebRequest which uses the system stack.
+	if strings.Contains(u, "/api/qt/clist/get") {
+		if err := getJSONViaPowerShell(ctx, u, out); err == nil {
+			return nil
+		}
+	}
+	return lastErr
 }

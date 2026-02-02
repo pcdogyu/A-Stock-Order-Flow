@@ -137,6 +137,91 @@ func UpsertTopListRT(db *sql.DB, tsUTC time.Time, fid string, rows []eastmoney.T
 	return tx.Commit()
 }
 
+func UpsertBoardRT(db *sql.DB, tsUTC time.Time, boardType, fid string, rows []eastmoney.TopItem) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO board_rt(ts_utc, board_type, fid, code, name, price, pct, value)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ts_utc, board_type, fid, code) DO UPDATE SET
+			name=excluded.name,
+			price=excluded.price,
+			pct=excluded.pct,
+			value=excluded.value
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	ts := tsUTC.Format(time.RFC3339Nano)
+	for _, r := range rows {
+		if _, err := stmt.Exec(ts, boardType, fid, r.Code, r.Name, r.Price, r.Pct, r.Value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func UpsertBoardDaily(db *sql.DB, tradeDate, boardType, fid string, rows []eastmoney.TopItem) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO board_daily(trade_date, board_type, fid, code, name, price, pct, value)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(trade_date, board_type, fid, code) DO UPDATE SET
+			name=excluded.name,
+			price=excluded.price,
+			pct=excluded.pct,
+			value=excluded.value
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, r := range rows {
+		if _, err := stmt.Exec(tradeDate, boardType, fid, r.Code, r.Name, r.Price, r.Pct, r.Value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func UpsertMarketAggRT(db *sql.DB, tsUTC time.Time, source, fid string, value float64) error {
+	_, err := db.Exec(`
+		INSERT INTO market_agg_rt(ts_utc, source, fid, value)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(ts_utc, source, fid) DO UPDATE SET
+			value=excluded.value
+	`, tsUTC.Format(time.RFC3339Nano), source, fid, value)
+	return err
+}
+
+func UpsertMarketAggDaily(db *sql.DB, tradeDate, source, fid string, value float64) error {
+	_, err := db.Exec(`
+		INSERT INTO market_agg_daily(trade_date, source, fid, value)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(trade_date, source, fid) DO UPDATE SET
+			value=excluded.value
+	`, tradeDate, source, fid, value)
+	return err
+}
+
 func UpsertMarginDaily(db *sql.DB, tradeDate string, row eastmoney.MarginDaily) error {
 	_, err := db.Exec(`
 		INSERT INTO margin_daily(
@@ -159,4 +244,3 @@ func UpsertMarginDaily(db *sql.DB, tradeDate string, row eastmoney.MarginDaily) 
 		row.RZYE, row.RZMRE, row.RZCHE, row.RZJME, row.RQYE, row.RQMCL, row.RQCHL, row.RQJMG, row.RZRQYE)
 	return err
 }
-

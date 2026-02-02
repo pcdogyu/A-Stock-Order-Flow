@@ -1,5 +1,7 @@
 data/
+bin/
 *.db
 *.db-wal
 *.db-shm
 
+configs/config.yaml

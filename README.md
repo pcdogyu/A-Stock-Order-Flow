@@ -6,6 +6,8 @@ Go-based collector for China A-share "fund flow" signals (free-first):
 - Northbound flow (沪股通/深股通): realtime snapshot (Eastmoney)
 - Margin trading (融资融券): per-stock latest record (Eastmoney datacenter)
 - Top list: ranked by an Eastmoney field id (default: `f62` main net inflow)
+- Industry / Concept boards: realtime + daily snapshots
+- Whole-market aggregate: computed as sum of industry board `fid` values (default: `f62`)
 
 This repo is an MVP aimed at: watchlist + top榜, with daily snapshots and realtime sampling.
 
@@ -34,6 +36,12 @@ go build -o .\\bin\\aof.exe .\\cmd\\aof
 
 ```powershell
 .\bin\aof.exe rt -config configs/config.yaml
+```
+
+Or run a web UI with settings (also runs realtime collector in the same process):
+
+```powershell
+.\bin\aof.exe web -config configs/config.yaml -addr 127.0.0.1:8080
 ```
 
 5) Run daily snapshot:

@@ -90,6 +90,46 @@ func Migrate(db *sql.DB) error {
 			PRIMARY KEY (ts_utc, fid, rank)
 		);`,
 
+		`CREATE TABLE IF NOT EXISTS board_rt (
+			ts_utc TEXT NOT NULL,
+			board_type TEXT NOT NULL, -- "industry" | "concept"
+			fid TEXT NOT NULL,
+			code TEXT NOT NULL,
+			name TEXT,
+			price REAL,
+			pct REAL,
+			value REAL,
+			PRIMARY KEY (ts_utc, board_type, fid, code)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS board_daily (
+			trade_date TEXT NOT NULL,
+			board_type TEXT NOT NULL,
+			fid TEXT NOT NULL,
+			code TEXT NOT NULL,
+			name TEXT,
+			price REAL,
+			pct REAL,
+			value REAL,
+			PRIMARY KEY (trade_date, board_type, fid, code)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS market_agg_rt (
+			ts_utc TEXT NOT NULL,
+			source TEXT NOT NULL, -- e.g. "industry_sum"
+			fid TEXT NOT NULL,
+			value REAL,
+			PRIMARY KEY (ts_utc, source, fid)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS market_agg_daily (
+			trade_date TEXT NOT NULL,
+			source TEXT NOT NULL,
+			fid TEXT NOT NULL,
+			value REAL,
+			PRIMARY KEY (trade_date, source, fid)
+		);`,
+
 		`CREATE TABLE IF NOT EXISTS margin_daily (
 			trade_date TEXT NOT NULL,
 			code TEXT NOT NULL,
@@ -115,4 +155,3 @@ func Migrate(db *sql.DB) error {
 	}
 	return nil
 }
-

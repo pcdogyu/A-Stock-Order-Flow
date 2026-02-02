@@ -17,3 +17,27 @@ toplist:
   # Eastmoney field id; f62 is commonly "today main net inflow".
   fid: "f62"
 
+industry:
+  enabled: true
+  # 86 industries fit in one page (pz=100), so safe to collect all each tick.
+  interval_seconds: 10
+  fs: "m:90+t:2"
+  fid: "f62"
+
+concept:
+  enabled: true
+  # Concepts are many; collecting all is heavier. Default: refresh every 60s, top 100.
+  interval_seconds: 60
+  fs: "m:90+t:3"
+  fid: "f62"
+  collect_all: false
+  top_size: 100
+
+market_agg:
+  enabled: true
+  # Sum of all A-share stocks (about 5500) by paging (100/page).
+  # Recommended: 60s+ to avoid excessive requests on free endpoints.
+  interval_seconds: 60
+  fs: "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23"
+  fid: "f62"
+  concurrency: 4

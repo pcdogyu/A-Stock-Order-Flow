@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>A-Stock-Order-Flow Settings</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <div>
+          <div class="kicker">A-Stock-Order-Flow</div>
+          <h1>资金流向采集器</h1>
+          <p class="sub">
+            免费优先：自选池 + Top榜 + 行业/概念 + 全A分页汇总。这里可以调整实时请求频率与采集策略。
+          </p>
+        </div>
+        <div class="status" id="status">
+          <div class="pill" id="pill">connecting</div>
+          <div class="meta">
+            <div><span class="label">DB</span> <span class="mono" id="dbPath">-</span></div>
+            <div><span class="label">Watchlist</span> <span class="mono" id="wlCount">0</span></div>
+          </div>
+        </div>
+      </header>
+
+      <section class="card">
+        <div class="cardHead">
+          <h2>实时采集频率</h2>
+          <div class="hint">单位：秒（建议 5-60）。修改后会即时生效并写回配置文件。</div>
+        </div>
+
+        <form id="formRealtime" class="grid">
+          <label class="field">
+            <span>主循环间隔</span>
+            <input type="number" min="1" max="600" step="1" id="rtInterval" />
+          </label>
+          <label class="field fieldToggle">
+            <span>仅交易时段采集</span>
+            <input type="checkbox" id="onlyTradeHours" />
+          </label>
+          <button type="submit" class="btn primary">保存实时设置</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="cardHead">
+          <h2>板块采集</h2>
+          <div class="hint">行业较少可全量；概念很多默认只抓 TopN。</div>
+        </div>
+
+        <form id="formBoards" class="grid">
+          <div class="group">
+            <div class="groupTitle">行业</div>
+            <label class="field fieldToggle">
+              <span>启用</span>
+              <input type="checkbox" id="indEnabled" />
+            </label>
+            <label class="field">
+              <span>间隔(秒)</span>
+              <input type="number" min="5" max="3600" step="1" id="indInterval" />
+            </label>
+          </div>
+
+          <div class="group">
+            <div class="groupTitle">概念</div>
+            <label class="field fieldToggle">
+              <span>启用</span>
+              <input type="checkbox" id="conEnabled" />
+            </label>
+            <label class="field">
+              <span>间隔(秒)</span>
+              <input type="number" min="5" max="3600" step="1" id="conInterval" />
+            </label>
+            <label class="field fieldToggle">
+              <span>抓全量</span>
+              <input type="checkbox" id="conAll" />
+            </label>
+            <label class="field">
+              <span>TopN(非全量)</span>
+              <input type="number" min="10" max="100" step="1" id="conTop" />
+            </label>
+          </div>
+
+          <button type="submit" class="btn primary">保存板块设置</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="cardHead">
+          <h2>全A分页汇总</h2>
+          <div class="hint">
+            通过分页拉取全A约 5506 只股票（100/页）并对 `fid` 求和。免费接口建议 60 秒以上。
+          </div>
+        </div>
+
+        <form id="formAgg" class="grid">
+          <label class="field fieldToggle">
+            <span>启用</span>
+            <input type="checkbox" id="aggEnabled" />
+          </label>
+          <label class="field">
+            <span>间隔(秒)</span>
+            <input type="number" min="30" max="3600" step="1" id="aggInterval" />
+          </label>
+          <label class="field">
+            <span>并发(1-10)</span>
+            <input type="number" min="1" max="10" step="1" id="aggConc" />
+          </label>
+          <button type="submit" class="btn primary">保存汇总设置</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="cardHead">
+          <h2>自选池</h2>
+          <div class="hint">每行一个：如 600519.SH、000001.SZ、920152.BJ</div>
+        </div>
+
+        <form id="formWatch" class="stack">
+          <textarea id="watchlist" rows="6" spellcheck="false"></textarea>
+          <button type="submit" class="btn">保存自选池</button>
+        </form>
+      </section>
+
+      <footer class="foot">
+        <div class="mono">
+          API: <span class="dim">GET</span> /api/config, <span class="dim">POST</span> /api/config
+        </div>
+      </footer>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+
