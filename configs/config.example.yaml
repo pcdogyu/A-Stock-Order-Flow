@@ -1,0 +1,19 @@
+db_path: data/aof.db
+
+# Your watchlist: "600519.SH", "000001.SZ", "920152.BJ"
+watchlist:
+  - 600519.SH
+  - 000001.SZ
+
+realtime:
+  interval_seconds: 10
+  # If true, only collect during CN trading sessions (Asia/Shanghai).
+  only_during_trading_hours: true
+
+toplist:
+  size: 20
+  # A-share universe (SH/SZ/BJ; excludes funds/indices).
+  fs: "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23"
+  # Eastmoney field id; f62 is commonly "today main net inflow".
+  fid: "f62"
+
