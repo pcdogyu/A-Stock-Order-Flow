@@ -177,7 +177,7 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
   background:#0b1018;
   padding:12px;
 }
-.boardPanel,.constPanel{min-height:560px}
+.boardPanel,.constPanel{height:560px}
 .boardPanel{display:flex;flex-direction:column}
 .boardPanel .list{flex:1;max-height:none;min-height:360px}
 .boardPanel .hint{margin-top:6px}
@@ -228,6 +228,7 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .tbl thead th{position:sticky;top:0;background:#0b1018;color:var(--muted);text-align:left;box-shadow:0 6px 10px rgba(0,0,0,.35)}
 .tbl tr:last-child td{border-bottom:none}
 .tbl .num{text-align:right}
+.tbl tbody tr:nth-child(2n){background:rgba(16,26,36,.55)}
 
 .foot{margin-top:16px;color:var(--muted);text-align:center}
 

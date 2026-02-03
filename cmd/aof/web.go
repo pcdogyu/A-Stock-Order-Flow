@@ -5,8 +5,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"strings"
@@ -14,6 +14,7 @@ import (
 
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/config"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/eastmoney"
+	"github.com/pcdogyu/A-Stock-Order-Flow/internal/market"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/memstore"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/runtimecfg"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/store/sqlite"
@@ -39,6 +40,22 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			return
 		}
 		snap := mem.SnapshotLatest()
+		if !market.IsCNTradingTime(time.Now()) {
+			if dbSnap, ok, err := sqlite.LoadLatestRTSnapshot(db); err == nil && ok {
+				ts, err := time.Parse(time.RFC3339Nano, dbSnap.TSUTC)
+				if err != nil {
+					ts = time.Now().UTC()
+				}
+				snap = memstore.Snapshot{
+					TSUTC:        ts,
+					Northbound:   dbSnap.Northbound,
+					Fundflow:     dbSnap.Fundflow,
+					ToplistByFID: dbSnap.ToplistByFID,
+					BoardsByKey:  dbSnap.BoardsByKey,
+					AggByKey:     dbSnap.AggByKey,
+				}
+			}
+		}
 		writeJSON(w, http.StatusOK, snap)
 	})
 
@@ -133,9 +150,17 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			}
 		}
 
-		snap := mem.SnapshotLatest()
-		key := tp + ":" + fid
-		rows := snap.BoardsByKey[key]
+		rows := []eastmoney.TopItem(nil)
+		if !market.IsCNTradingTime(time.Now()) {
+			if _, dbRows, err := sqlite.QueryBoardRTLatest(db, tp, fid, limit); err == nil && len(dbRows) > 0 {
+				rows = dbRows
+			}
+		}
+		if len(rows) == 0 {
+			snap := mem.SnapshotLatest()
+			key := tp + ":" + fid
+			rows = snap.BoardsByKey[key]
+		}
 		fromLive := false
 		if len(rows) == 0 && bcfg.Enabled && bcfg.FS != "" {
 			var items []eastmoney.TopItem
@@ -247,8 +272,8 @@ type configView struct {
 		FID  string `json:"fid"`
 	} `json:"toplist"`
 
-	Industry config.BoardConfig    `json:"industry"`
-	Concept  config.BoardConfig    `json:"concept"`
+	Industry  config.BoardConfig     `json:"industry"`
+	Concept   config.BoardConfig     `json:"concept"`
 	MarketAgg config.MarketAggConfig `json:"market_agg"`
 }
 
