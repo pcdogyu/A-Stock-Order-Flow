@@ -177,9 +177,13 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
   background:#0b1018;
   padding:12px;
 }
-.boardPanel,.constPanel{min-height:520px}
+.boardPanel,.constPanel{min-height:560px}
 .boardPanel{display:flex;flex-direction:column}
-.boardPanel .list{flex:1;max-height:none}
+.boardPanel .list{flex:1;max-height:none;min-height:360px}
+.boardPanel .hint{margin-top:6px}
+.constPanel .tableWrap{max-height:560px}
+.boardPanel .list::-webkit-scrollbar{width:8px}
+.boardPanel .list::-webkit-scrollbar-thumb{background:rgba(70,214,163,.25);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
 .panelTitle{
   font-family:var(--mono);
   text-transform:uppercase;
@@ -219,7 +223,7 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .tableWrap{overflow:auto;border-radius:12px;border:1px solid rgba(34,48,66,.6);width:100%}
 .tbl{width:100%;min-width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
 .tbl th,.tbl td{padding:10px 10px;border-bottom:1px solid rgba(34,48,66,.5);white-space:nowrap}
-.tbl thead th{position:sticky;top:0;background:#0b1018;color:var(--muted);text-align:left}
+.tbl thead th{position:sticky;top:0;background:#0b1018;color:var(--muted);text-align:left;box-shadow:0 6px 10px rgba(0,0,0,.35)}
 .tbl tr:last-child td{border-bottom:none}
 .tbl .num{text-align:right}
 
