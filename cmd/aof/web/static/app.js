@@ -77,6 +77,161 @@ function fmtBJTime(isoLike) {
   return `${m.year}-${m.month}-${m.day} ${m.hour}:${m.minute}:${m.second}`;
 }
 
+function colorVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+  return (v && v.trim()) ? v.trim() : fallback;
+}
+
+function drawLineChart(canvas, labels, values) {
+  if (!canvas) return;
+
+  const parentW = canvas.clientWidth || 600;
+  const parentH = canvas.clientHeight || 240;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(parentW * dpr);
+  canvas.height = Math.floor(parentH * dpr);
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const bg = colorVar("--bg0", "#0b0e14");
+  const stroke = colorVar("--stroke", "#223042");
+  const muted = colorVar("--muted", "#a8b4c6");
+  const accent = colorVar("--accent", "#46d6a3");
+
+  ctx.clearRect(0, 0, parentW, parentH);
+  ctx.fillStyle = "#0b1018";
+  ctx.fillRect(0, 0, parentW, parentH);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, parentW - 1, parentH - 1);
+
+  const n = Math.min(labels.length, values.length);
+  if (n < 2) {
+    ctx.fillStyle = muted;
+    ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+    ctx.fillText("no data", 12, 20);
+    return;
+  }
+
+  const padL = 56, padR = 14, padT = 14, padB = 32;
+  const w = parentW - padL - padR;
+  const h = parentH - padT - padB;
+
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const y = Number(values[i]);
+    if (!Number.isFinite(y)) continue;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+  if (minY === maxY) {
+    minY -= 1;
+    maxY += 1;
+  } else {
+    const pad = (maxY - minY) * 0.06;
+    minY -= pad;
+    maxY += pad;
+  }
+
+  const xAt = (i) => padL + (i / (n - 1)) * w;
+  const yAt = (v) => padT + (1 - (v - minY) / (maxY - minY)) * h;
+
+  // Grid + y-axis labels
+  ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+  ctx.fillStyle = muted;
+  ctx.strokeStyle = "rgba(168,180,198,.18)";
+  ctx.lineWidth = 1;
+  const yTicks = 4;
+  for (let t = 0; t <= yTicks; t++) {
+    const p = t / yTicks;
+    const y = padT + p * h;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + w, y);
+    ctx.stroke();
+    const val = maxY - p * (maxY - minY);
+    const txt = fmtMoney(val);
+    ctx.fillText(txt, 10, y + 4);
+  }
+
+  // X-axis labels
+  ctx.strokeStyle = stroke;
+  ctx.beginPath();
+  ctx.moveTo(padL, padT + h);
+  ctx.lineTo(padL + w, padT + h);
+  ctx.stroke();
+
+  const xTicks = Math.min(6, n);
+  for (let t = 0; t < xTicks; t++) {
+    const idx = Math.round((t / (xTicks - 1)) * (n - 1));
+    const x = xAt(idx);
+    const lab = String(labels[idx] ?? "");
+    ctx.fillStyle = muted;
+    ctx.textAlign = t === 0 ? "left" : (t === xTicks - 1 ? "right" : "center");
+    ctx.fillText(lab, x, parentH - 10);
+  }
+  ctx.textAlign = "left";
+
+  // Line path
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const v = Number(values[i]);
+    const x = xAt(i);
+    const y = yAt(v);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Points
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 80))) {
+    const v = Number(values[i]);
+    const x = xAt(i);
+    const y = yAt(v);
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function renderHistoryChart(meta, rows) {
+  const panel = document.getElementById("histChartPanel");
+  const canvas = document.getElementById("histChart");
+  if (!panel || !canvas) return;
+
+  const source = meta?.source || "";
+  const kind = meta?.kind || "daily";
+  const show = source === "industry_sum";
+  panel.hidden = !show;
+  if (!show) return;
+
+  const labels = [];
+  const values = [];
+  (rows || []).forEach(r => {
+    const v = Number(r.value ?? r.Value);
+    if (!Number.isFinite(v)) return;
+    if (kind === "rt") {
+      const t = fmtBJTime(r.ts_utc || r.TSUTC || "");
+      labels.push(t === "-" ? "-" : t.slice(5, 16)); // "MM-DD HH:mm"
+      values.push(v);
+    } else {
+      labels.push(r.trade_date || r.TradeDate || "-");
+      values.push(v);
+    }
+  });
+
+  drawLineChart(canvas, labels, values);
+}
+
 function setText(id, v) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -165,6 +320,8 @@ let state = {
   boardCode: null,
   boardPN: 1,
   boardPZ: 30,
+  historyMeta: null,
+  historyRows: null,
 };
 
 function clearTimers() {
@@ -199,6 +356,12 @@ async function refreshBuildInfo() {
 
 function wire() {
   window.addEventListener("hashchange", () => bootRoute());
+  window.addEventListener("resize", () => {
+    if (getRoute() !== "history") return;
+    if (state.historyMeta && state.historyRows) {
+      renderHistoryChart(state.historyMeta, state.historyRows);
+    }
+  });
 
   document.getElementById("btnPrev")?.addEventListener("click", async () => {
     if (!state.boardCode) return;
@@ -384,6 +547,9 @@ async function loadHistory() {
 
     const url = `/api/history/market_agg?source=${encodeURIComponent(source)}&fid=${encodeURIComponent(fid)}&kind=${encodeURIComponent(kind)}&limit=${encodeURIComponent(String(limit))}`;
     const rows = await getJSON(url);
+    state.historyMeta = { source, kind, fid, limit };
+    state.historyRows = rows;
+    renderHistoryChart(state.historyMeta, state.historyRows);
 
     const head = document.getElementById("histHead");
     const tbody = document.querySelector("#tblHist tbody");

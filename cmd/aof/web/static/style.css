@@ -186,7 +186,8 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .constPanel .tableWrap{min-height:360px}
 .boardPanel .panelTitle{font-size:14px}
 .boardPanel .item .name,
-.boardPanel .item .val{font-size:14px}
+.boardPanel .item .val,
+.boardPanel .item .code{font-size:14px}
 .boardPanel .list::-webkit-scrollbar{width:8px}
 .boardPanel .list::-webkit-scrollbar-thumb{background:rgba(70,214,163,.25);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
 .panelTitle{
