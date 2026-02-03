@@ -25,6 +25,14 @@ body{
 }
 
 .wrap{max-width:980px;margin:0 auto;padding:28px 18px 56px}
+.topbar{
+  position:sticky;
+  top:0;
+  z-index:20;
+  padding:10px 0 12px;
+  background:linear-gradient(180deg, rgba(11,14,20,.92), rgba(11,14,20,0));
+  backdrop-filter: blur(10px);
+}
 .hero{
   display:flex;gap:16px;align-items:flex-start;justify-content:space-between;
   padding:18px 18px 14px;
@@ -39,7 +47,7 @@ body{
 .kicker{letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-size:12px}
 h1{font-family:var(--serif);font-weight:700;margin:6px 0 6px;font-size:34px}
 .sub{color:var(--muted);margin:0;max-width:56ch}
-.nav{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}
+.nav{display:flex;gap:10px;flex-wrap:wrap}
 .tab{
   display:inline-flex;align-items:center;
   padding:8px 10px;border-radius:999px;

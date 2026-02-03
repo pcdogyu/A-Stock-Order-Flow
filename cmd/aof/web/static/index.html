@@ -3,22 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>A-Stock-Order-Flow</title>
+    <title>资金流向采集器</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
     <main class="wrap">
+      <div class="topbar">
+        <nav class="nav" id="nav">
+          <a class="tab" href="#/home" data-route="home">首页</a>
+          <a class="tab" href="#/history" data-route="history">历史资金流量</a>
+          <a class="tab" href="#/settings" data-route="settings">设置</a>
+        </nav>
+      </div>
+
       <header class="hero">
         <div>
           <div class="kicker">A-Stock-Order-Flow</div>
-          <h1>资金流向采集器</h1>
+          <h1>实时资金流向</h1>
           <p class="sub">实时看板 + 历史查询 + 设置（配置会写回 YAML）。</p>
-
-          <nav class="nav" id="nav">
-            <a class="tab" href="#/home" data-route="home">首页</a>
-            <a class="tab" href="#/history" data-route="history">历史资金流量</a>
-            <a class="tab" href="#/settings" data-route="settings">设置</a>
-          </nav>
         </div>
         <div class="status" id="status">
           <div class="pill" id="pill">connecting</div>
