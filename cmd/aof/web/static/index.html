@@ -73,6 +73,40 @@
             </table>
           </div>
         </div>
+
+        <div class="grid grid2" style="margin-top:12px">
+          <div class="panel">
+            <div class="panelTitle">板块</div>
+            <div class="row">
+              <button class="chip active" id="btnInd" type="button">行业</button>
+              <button class="chip" id="btnCon" type="button">概念</button>
+            </div>
+            <div class="list" id="boardList"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panelTitle">成份股今日走势</div>
+            <div class="row rowSpread">
+              <div class="mono dim" id="boardSel">未选择</div>
+              <div class="row">
+                <button class="chip" id="btnPrev" type="button">上一页</button>
+                <button class="chip" id="btnNext" type="button">下一页</button>
+              </div>
+            </div>
+            <div class="tableWrap" style="margin-top:10px">
+              <table class="tbl" id="tblCon">
+                <thead>
+                  <tr>
+                    <th>代码</th><th>名称</th>
+                    <th class="num">现价</th><th class="num">涨跌幅</th>
+                    <th class="num">开盘</th><th class="num">最高</th><th class="num">最低</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- History -->

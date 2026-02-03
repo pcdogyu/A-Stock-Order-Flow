@@ -10,8 +10,10 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/config"
+	"github.com/pcdogyu/A-Stock-Order-Flow/internal/eastmoney"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/memstore"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/runtimecfg"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/store/sqlite"
@@ -24,6 +26,7 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 	if mem == nil {
 		mem = memstore.New()
 	}
+	em := eastmoney.NewClient()
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +99,65 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			return
 		}
 		writeJSON(w, http.StatusOK, rows)
+	})
+
+	// Board list from in-memory snapshot:
+	// GET /api/boards?type=industry|concept&fid=f62&limit=50
+	mux.HandleFunc("/api/boards", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		tp := r.URL.Query().Get("type")
+		if tp == "" {
+			tp = "industry"
+		}
+		fid := r.URL.Query().Get("fid")
+		if fid == "" {
+			fid = "f62"
+		}
+		limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+
+		snap := mem.SnapshotLatest()
+		key := tp + ":" + fid
+		rows := snap.BoardsByKey[key]
+		if len(rows) > limit {
+			rows = rows[:limit]
+		}
+		type boardInfo struct {
+			Code  string  `json:"code"`
+			Name  string  `json:"name"`
+			Value float64 `json:"value"`
+			Pct   float64 `json:"pct"`
+			Price float64 `json:"price"`
+		}
+		out := make([]boardInfo, 0, len(rows))
+		for _, it := range rows {
+			out = append(out, boardInfo{Code: it.Code, Name: it.Name, Value: it.Value, Pct: it.Pct, Price: it.Price})
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
+	// Board constituents (stocks with today's move):
+	// GET /api/board/constituents?board=BK0457&pn=1&pz=50
+	mux.HandleFunc("/api/board/constituents", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		board := r.URL.Query().Get("board")
+		if board == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "board is required (e.g. BK0457)"})
+			return
+		}
+		pn := parseLimit(r.URL.Query().Get("pn"), 1, 1000000)
+		pz := parseLimit(r.URL.Query().Get("pz"), 50, 100)
+		total, rows, err := em.BoardConstituents(r.Context(), board, pn, pz)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"total": total, "rows": rows, "ts_utc": time.Now().UTC()})
 	})
 
 	// Static UI.

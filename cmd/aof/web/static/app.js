@@ -161,6 +161,10 @@ function getRoute() {
 let state = {
   cfg: null,
   timers: [],
+  boardType: "industry",
+  boardCode: null,
+  boardPN: 1,
+  boardPZ: 30,
 };
 
 function clearTimers() {
@@ -184,6 +188,25 @@ async function refreshConfig() {
 
 function wire() {
   window.addEventListener("hashchange", () => bootRoute());
+
+  document.getElementById("btnInd")?.addEventListener("click", async () => {
+    setBoardType("industry");
+    try { await loadBoards(); } catch (e) { console.error(e); }
+  });
+  document.getElementById("btnCon")?.addEventListener("click", async () => {
+    setBoardType("concept");
+    try { await loadBoards(); } catch (e) { console.error(e); }
+  });
+  document.getElementById("btnPrev")?.addEventListener("click", async () => {
+    if (!state.boardCode) return;
+    if (state.boardPN > 1) state.boardPN--;
+    try { await loadConstituents(); } catch (e) { console.error(e); }
+  });
+  document.getElementById("btnNext")?.addEventListener("click", async () => {
+    if (!state.boardCode) return;
+    state.boardPN++;
+    try { await loadConstituents(); } catch (e) { console.error(e); }
+  });
 
   document.getElementById("formRealtime").addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -281,6 +304,65 @@ async function refreshRealtimeOnce() {
   }
 }
 
+function setBoardType(tp) {
+  state.boardType = tp;
+  state.boardCode = null;
+  state.boardPN = 1;
+  document.getElementById("btnInd")?.classList.toggle("active", tp === "industry");
+  document.getElementById("btnCon")?.classList.toggle("active", tp === "concept");
+  const sel = document.getElementById("boardSel");
+  if (sel) sel.textContent = "未选择";
+  const tbody = document.querySelector("#tblCon tbody");
+  if (tbody) tbody.innerHTML = "";
+}
+
+async function loadBoards() {
+  const fid = (state.cfg?.industry?.fid) || "f62";
+  const url = `/api/boards?type=${encodeURIComponent(state.boardType)}&fid=${encodeURIComponent(fid)}&limit=50`;
+  const boards = await getJSON(url);
+  const list = document.getElementById("boardList");
+  if (!list) return;
+  list.innerHTML = "";
+  boards.forEach(b => {
+    const div = document.createElement("div");
+    div.className = "item";
+    div.dataset.code = b.code;
+    div.innerHTML = `<div class="name">${b.name} <span class="code">${b.code}</span></div><div class="val">${fmtMoney(b.value)}</div>`;
+    div.addEventListener("click", async () => {
+      document.querySelectorAll("#boardList .item").forEach(x => x.classList.remove("active"));
+      div.classList.add("active");
+      state.boardCode = b.code;
+      state.boardPN = 1;
+      const sel = document.getElementById("boardSel");
+      if (sel) sel.textContent = `${b.name} (${b.code})`;
+      await loadConstituents();
+    });
+    list.appendChild(div);
+  });
+}
+
+async function loadConstituents() {
+  if (!state.boardCode) return;
+  const url = `/api/board/constituents?board=${encodeURIComponent(state.boardCode)}&pn=${encodeURIComponent(String(state.boardPN))}&pz=${encodeURIComponent(String(state.boardPZ))}`;
+  const data = await getJSON(url);
+  const rows = data.rows || [];
+  const tbody = document.querySelector("#tblCon tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    const td = (t, cls) => { const x=document.createElement("td"); if(cls) x.className=cls; x.textContent=t; return x; };
+    tr.appendChild(td(r.code));
+    tr.appendChild(td(r.name || "-"));
+    tr.appendChild(td(String(r.price ?? "-"), "num"));
+    tr.appendChild(td((r.pct ?? "-") + (Number.isFinite(r.pct) ? "%" : ""), "num"));
+    tr.appendChild(td(String(r.open ?? "-"), "num"));
+    tr.appendChild(td(String(r.high ?? "-"), "num"));
+    tr.appendChild(td(String(r.low ?? "-"), "num"));
+    tbody.appendChild(tr);
+  });
+}
+
 async function loadHistory() {
   try {
     setPill(true, "loading...");
@@ -343,6 +425,12 @@ async function bootRoute() {
   if (route === "home") {
     await refreshRealtimeOnce();
     state.timers.push(setInterval(refreshRealtimeOnce, 2000));
+    try {
+      setBoardType(state.boardType);
+      await loadBoards();
+    } catch (e) {
+      console.error(e);
+    }
   } else if (route === "history") {
     await loadHistory();
   } else if (route === "settings") {

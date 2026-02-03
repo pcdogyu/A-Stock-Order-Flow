@@ -1,8 +1,11 @@
 package eastmoney
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +29,10 @@ func NewClient() *Client {
 				IdleConnTimeout:     30 * time.Second,
 				// Some public endpoints occasionally misbehave with HTTP/2 and/or keep-alives.
 				ForceAttemptHTTP2: false,
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+					MaxVersion: tls.VersionTLS12,
+				},
 			},
 			Timeout: 20 * time.Second,
 		},
@@ -225,9 +232,16 @@ func (c *Client) getJSON(ctx context.Context, u string, out any) error {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 			attemptErr = fmt.Errorf("http %d: %s", resp.StatusCode, string(b))
 		} else {
-			dec := json.NewDecoder(resp.Body)
-			dec.UseNumber()
-			attemptErr = dec.Decode(out)
+			// Some endpoints (notably push2 clist) may close TLS without close_notify on Windows,
+			// which can surface as io.ErrUnexpectedEOF. If we can still parse the payload, accept it.
+			b, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+			if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+				attemptErr = readErr
+			} else {
+				dec := json.NewDecoder(bytes.NewReader(b))
+				dec.UseNumber()
+				attemptErr = dec.Decode(out)
+			}
 		}
 		_ = resp.Body.Close()
 
