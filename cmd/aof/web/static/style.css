@@ -181,7 +181,9 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .boardPanel{display:flex;flex-direction:column}
 .boardPanel .list{flex:1;max-height:none;min-height:360px}
 .boardPanel .hint{margin-top:6px}
-.constPanel .tableWrap{max-height:560px}
+.constPanel .tableWrap{flex:1;max-height:none}
+.constPanel{display:flex;flex-direction:column}
+.constPanel .tableWrap{min-height:360px}
 .boardPanel .list::-webkit-scrollbar{width:8px}
 .boardPanel .list::-webkit-scrollbar-thumb{background:rgba(70,214,163,.25);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
 .panelTitle{
