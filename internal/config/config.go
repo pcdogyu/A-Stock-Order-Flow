@@ -39,22 +39,22 @@ type Config struct {
 }
 
 type BoardConfig struct {
-	Enabled         bool   `yaml:"enabled"`
-	IntervalSeconds int    `yaml:"interval_seconds"`
-	FS              string `yaml:"fs"`
-	FID             string `yaml:"fid"`
+	Enabled         bool   `yaml:"enabled" json:"enabled"`
+	IntervalSeconds int    `yaml:"interval_seconds" json:"interval_seconds"`
+	FS              string `yaml:"fs" json:"fs"`
+	FID             string `yaml:"fid" json:"fid"`
 
 	// If true, fetch all pages; otherwise fetch only the first page up to TopSize.
-	CollectAll bool `yaml:"collect_all"`
-	TopSize    int  `yaml:"top_size"`
+	CollectAll bool `yaml:"collect_all" json:"collect_all"`
+	TopSize    int  `yaml:"top_size" json:"top_size"`
 }
 
 type MarketAggConfig struct {
-	Enabled         bool   `yaml:"enabled"`
-	IntervalSeconds int    `yaml:"interval_seconds"`
-	FS              string `yaml:"fs"`
-	FID             string `yaml:"fid"`
-	Concurrency      int   `yaml:"concurrency"`
+	Enabled         bool   `yaml:"enabled" json:"enabled"`
+	IntervalSeconds int    `yaml:"interval_seconds" json:"interval_seconds"`
+	FS              string `yaml:"fs" json:"fs"`
+	FID             string `yaml:"fid" json:"fid"`
+	Concurrency      int   `yaml:"concurrency" json:"concurrency"`
 }
 
 func Load(path string) (Config, error) {
