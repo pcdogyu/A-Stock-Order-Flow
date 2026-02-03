@@ -75,6 +75,20 @@
         </div>
 
         <div class="grid grid2" style="margin-top:12px">
+          <div class="panel boardPanel">
+            <div class="panelTitle">行业板块</div>
+            <div class="hint tiny" id="boardHintInd" hidden></div>
+            <div class="list" id="boardListInd"></div>
+          </div>
+
+          <div class="panel boardPanel">
+            <div class="panelTitle">概念板块</div>
+            <div class="hint tiny" id="boardHintCon" hidden></div>
+            <div class="list" id="boardListCon"></div>
+          </div>
+        </div>
+
+        <div class="grid grid2" style="margin-top:12px">
           <div class="panel constPanel">
             <div class="panelTitle">成份股今日走势</div>
             <div class="row rowSpread">
@@ -96,20 +110,6 @@
                 <tbody></tbody>
               </table>
             </div>
-          </div>
-        </div>
-
-        <div class="grid grid2" style="margin-top:12px">
-          <div class="panel boardPanel">
-            <div class="panelTitle">行业板块</div>
-            <div class="hint tiny" id="boardHintInd" hidden></div>
-            <div class="list" id="boardListInd"></div>
-          </div>
-
-          <div class="panel boardPanel">
-            <div class="panelTitle">概念板块</div>
-            <div class="hint tiny" id="boardHintCon" hidden></div>
-            <div class="list" id="boardListCon"></div>
           </div>
         </div>
       </section>
@@ -142,6 +142,11 @@
           </label>
           <button type="submit" class="btn primary">加载</button>
         </form>
+
+        <div class="panel" style="margin-top:12px" id="histChartPanel" hidden>
+          <div class="panelTitle">行业求和（折线图）</div>
+          <canvas id="histChart" class="chartCanvas" height="240"></canvas>
+        </div>
 
         <div class="panel" style="margin-top:12px">
           <div class="panelTitle">数据</div>
@@ -261,6 +266,7 @@
         <div class="mono">
           API: <span class="dim">GET</span> /api/realtime, <span class="dim">GET</span> /api/config, <span class="dim">POST</span> /api/config
         </div>
+        <div class="mono dim" id="buildInfo">Code by Yuhao@jiansutech.com at -</div>
       </footer>
     </main>
 

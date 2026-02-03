@@ -186,6 +186,17 @@ async function refreshConfig() {
   }
 }
 
+async function refreshBuildInfo() {
+  try {
+    const v = await getJSON("/api/version");
+    if (v && v.last_commit_time) {
+      setText("buildInfo", `Code by Yuhao@jiansutech.com at ${v.last_commit_time}`);
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 function wire() {
   window.addEventListener("hashchange", () => bootRoute());
 
@@ -434,6 +445,7 @@ async function bootRoute() {
     } catch (e) {
       console.error(e);
     }
+    await refreshBuildInfo();
   } else if (route === "history") {
     await loadHistory();
   } else if (route === "settings") {

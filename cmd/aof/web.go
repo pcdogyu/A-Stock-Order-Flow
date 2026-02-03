@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -28,10 +30,18 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		mem = memstore.New()
 	}
 	em := eastmoney.NewClient()
+	lastCommit := resolveLastCommitTime()
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"last_commit_time": lastCommit})
 	})
 
 	mux.HandleFunc("/api/realtime", func(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +258,34 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 	})
 
 	return logRequests(mux)
+}
+
+func resolveLastCommitTime() string {
+	cmd := exec.Command("git", "log", "-1", "--format=%cd", "--date=iso-strict")
+	cmd.Dir = resolveRepoRoot()
+	out, err := cmd.Output()
+	if err != nil {
+		return "-"
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func resolveRepoRoot() string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err == nil {
+		if s := strings.TrimSpace(string(out)); s != "" {
+			return s
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		return wd
+	}
+	return "."
 }
 
 func logRequests(next http.Handler) http.Handler {

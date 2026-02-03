@@ -184,6 +184,9 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .constPanel .tableWrap{flex:1;max-height:none}
 .constPanel{display:flex;flex-direction:column}
 .constPanel .tableWrap{min-height:360px}
+.boardPanel .panelTitle{font-size:14px}
+.boardPanel .item .name,
+.boardPanel .item .val{font-size:14px}
 .boardPanel .list::-webkit-scrollbar{width:8px}
 .boardPanel .list::-webkit-scrollbar-thumb{background:rgba(70,214,163,.25);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
 .panelTitle{
@@ -229,6 +232,8 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .tbl tr:last-child td{border-bottom:none}
 .tbl .num{text-align:right}
 .tbl tbody tr:nth-child(2n){background:rgba(16,26,36,.55)}
+
+.chartCanvas{display:block;width:100%;height:240px}
 
 .foot{margin-top:16px;color:var(--muted);text-align:center}
 
