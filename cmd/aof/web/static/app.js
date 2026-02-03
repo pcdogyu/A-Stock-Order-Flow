@@ -317,9 +317,18 @@ function setBoardType(tp) {
 }
 
 async function loadBoards() {
-  const fid = (state.cfg?.industry?.fid) || "f62";
+  const fid = (state.boardType === "concept" ? state.cfg?.concept?.fid : state.cfg?.industry?.fid) || "f62";
   const url = `/api/boards?type=${encodeURIComponent(state.boardType)}&fid=${encodeURIComponent(fid)}&limit=50`;
-  const boards = await getJSON(url);
+  const data = await getJSON(url);
+  const boards = Array.isArray(data) ? data : (data.rows || []);
+  const boardHint = document.getElementById("boardHint");
+  if (boardHint) {
+    const show = !Array.isArray(data) && !!data.from_live;
+    boardHint.hidden = !show;
+    if (show) {
+      boardHint.textContent = "市场休市或未抓到快照，已即时拉取板块数据。";
+    }
+  }
   const list = document.getElementById("boardList");
   if (!list) return;
   list.innerHTML = "";

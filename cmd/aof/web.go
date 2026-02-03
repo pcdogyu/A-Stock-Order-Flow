@@ -112,15 +112,53 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		if tp == "" {
 			tp = "industry"
 		}
-		fid := r.URL.Query().Get("fid")
-		if fid == "" {
-			fid = "f62"
+		if tp != "industry" && tp != "concept" {
+			tp = "industry"
 		}
+		fid := r.URL.Query().Get("fid")
 		limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+
+		cfg := mgr.Get()
+		var bcfg config.BoardConfig
+		if tp == "concept" {
+			bcfg = cfg.Concept
+		} else {
+			bcfg = cfg.Industry
+		}
+		if fid == "" {
+			if bcfg.FID != "" {
+				fid = bcfg.FID
+			} else {
+				fid = "f62"
+			}
+		}
 
 		snap := mem.SnapshotLatest()
 		key := tp + ":" + fid
 		rows := snap.BoardsByKey[key]
+		fromLive := false
+		if len(rows) == 0 && bcfg.Enabled && bcfg.FS != "" {
+			var items []eastmoney.TopItem
+			var err error
+			if tp == "concept" && !bcfg.CollectAll {
+				items, err = em.BoardListTop(r.Context(), bcfg.FS, fid, bcfg.TopSize)
+			} else {
+				items, err = em.BoardListAll(r.Context(), bcfg.FS, fid)
+			}
+			if err == nil && len(items) > 0 {
+				ts := time.Now().UTC()
+				mem.SetBoard(ts, tp, fid, items)
+				if tp == "industry" {
+					var sum float64
+					for _, it := range items {
+						sum += it.Value
+					}
+					mem.SetAgg(ts, "industry_sum", fid, sum)
+				}
+				rows = items
+				fromLive = true
+			}
+		}
 		if len(rows) > limit {
 			rows = rows[:limit]
 		}
@@ -135,7 +173,7 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		for _, it := range rows {
 			out = append(out, boardInfo{Code: it.Code, Name: it.Name, Value: it.Value, Pct: it.Pct, Price: it.Price})
 		}
-		writeJSON(w, http.StatusOK, out)
+		writeJSON(w, http.StatusOK, map[string]any{"rows": out, "from_live": fromLive})
 	})
 
 	// Board constituents (stocks with today's move):
