@@ -58,3 +58,29 @@ func ToEastmoneySecIDs(symbols []string) ([]string, error) {
 	return out, nil
 }
 
+// ToEastmoneySecIDFromCode infers market from a bare stock code and returns Eastmoney secid.
+// Heuristic is intended for A-share board constituents.
+func ToEastmoneySecIDFromCode(code string) (string, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return "", fmt.Errorf("empty code")
+	}
+	// If caller already passed "600519.SH", honor it.
+	if strings.Contains(code, ".") {
+		return ToEastmoneySecID(code)
+	}
+
+	// Infer market suffix.
+	sfx := "SZ"
+	switch {
+	case strings.HasPrefix(code, "92") || strings.HasPrefix(code, "8") || strings.HasPrefix(code, "4"):
+		sfx = "BJ"
+	case strings.HasPrefix(code, "6") || strings.HasPrefix(code, "9"):
+		sfx = "SH"
+	case strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3"):
+		sfx = "SZ"
+	default:
+		sfx = "SZ"
+	}
+	return ToEastmoneySecID(code + "." + sfx)
+}

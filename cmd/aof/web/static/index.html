@@ -16,20 +16,6 @@
         </nav>
       </div>
 
-      <header class="hero">
-        <div>
-          <div class="kicker">A-Stock-Order-Flow</div>
-          <h1>实时资金流向</h1>
-          <p class="sub">实时看板 + 历史查询 + 设置（配置会写回 YAML）。</p>
-        </div>
-        <div class="status" id="status">
-          <div class="pill" id="pill">connecting</div>
-          <div class="meta">
-            <div><span class="label">DB</span> <span class="mono" id="dbPath">-</span></div>
-            <div><span class="label">Watchlist</span> <span class="mono" id="wlCount">0</span></div>
-          </div>
-        </div>
-      </header>
 
       <!-- Home: realtime dashboard -->
       <section class="card view" id="viewHome" data-view="home">
@@ -79,12 +65,24 @@
             <div class="panelTitle">行业板块</div>
             <div class="hint tiny" id="boardHintInd" hidden></div>
             <div class="list" id="boardListInd"></div>
+            <div class="spark">
+              <div class="row rowSpread">
+                <div class="mono dim" id="sparkTitleInd">成份股走势：-</div>
+              </div>
+              <canvas id="sparkInd" class="sparkCanvas" height="160"></canvas>
+            </div>
           </div>
 
           <div class="panel boardPanel">
             <div class="panelTitle">概念板块</div>
             <div class="hint tiny" id="boardHintCon" hidden></div>
             <div class="list" id="boardListCon"></div>
+            <div class="spark">
+              <div class="row rowSpread">
+                <div class="mono dim" id="sparkTitleCon">成份股走势：-</div>
+              </div>
+              <canvas id="sparkCon" class="sparkCanvas" height="160"></canvas>
+            </div>
           </div>
         </div>
 
@@ -263,9 +261,6 @@
       </section>
 
       <footer class="foot">
-        <div class="mono">
-          API: <span class="dim">GET</span> /api/realtime, <span class="dim">GET</span> /api/config, <span class="dim">POST</span> /api/config
-        </div>
         <div class="mono dim" id="buildInfo">Code by Yuhao@jiansutech.com at -</div>
       </footer>
     </main>

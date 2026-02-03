@@ -20,6 +20,7 @@ import (
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/memstore"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/runtimecfg"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/store/sqlite"
+	"github.com/pcdogyu/A-Stock-Order-Flow/internal/symbol"
 )
 
 //go:embed web/static/*
@@ -233,6 +234,31 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		writeJSON(w, http.StatusOK, map[string]any{"total": total, "rows": rows, "ts_utc": time.Now().UTC()})
 	})
 
+	// Stock intraday trend (today):
+	// GET /api/stock/trend?code=600519
+	mux.HandleFunc("/api/stock/trend", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		code := strings.TrimSpace(r.URL.Query().Get("code"))
+		if code == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "code is required (e.g. 600519)"})
+			return
+		}
+		secid, err := symbol.ToEastmoneySecIDFromCode(code)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		points, err := em.StockTrends1D(r.Context(), secid)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"code": code, "secid": secid, "points": points, "ts_utc": time.Now().UTC()})
+	})
+
 	// Static UI.
 	sub, _ := fs.Sub(webFS, "web/static")
 	fileServer := http.FileServer(http.FS(sub))
@@ -261,8 +287,9 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 }
 
 func resolveLastCommitTime() string {
-	cmd := exec.Command("git", "log", "-1", "--format=%cd", "--date=iso-strict")
+	cmd := exec.Command("git", "log", "-1", "--format=%cd", "--date=format-local:%Y-%m-%d %H:%M")
 	cmd.Dir = resolveRepoRoot()
+	cmd.Env = append(os.Environ(), "TZ=Asia/Shanghai")
 	out, err := cmd.Output()
 	if err != nil {
 		return "-"

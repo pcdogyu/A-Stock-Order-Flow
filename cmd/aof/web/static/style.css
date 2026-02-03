@@ -47,7 +47,7 @@ body{
 .kicker{letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-size:12px}
 h1{font-family:var(--serif);font-weight:700;margin:6px 0 6px;font-size:34px}
 .sub{color:var(--muted);margin:0;max-width:56ch}
-.nav{display:flex;gap:10px;flex-wrap:wrap}
+.nav{display:flex;gap:10px;flex-wrap:wrap;width:100%;justify-content:center}
 .tab{
   display:inline-flex;align-items:center;
   padding:8px 10px;border-radius:999px;
@@ -181,13 +181,15 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .boardPanel{display:flex;flex-direction:column}
 .boardPanel .list{flex:1;max-height:none;min-height:360px}
 .boardPanel .hint{margin-top:6px}
+.spark{margin-top:10px;padding-top:10px;border-top:1px dashed rgba(34,48,66,.55)}
+.sparkCanvas{display:block;width:100%;height:160px}
 .constPanel .tableWrap{flex:1;max-height:none}
 .constPanel{display:flex;flex-direction:column}
 .constPanel .tableWrap{min-height:360px}
-.boardPanel .panelTitle{font-size:14px}
+.boardPanel .panelTitle{font-size:16px}
 .boardPanel .item .name,
 .boardPanel .item .val,
-.boardPanel .item .code{font-size:14px}
+.boardPanel .item .code{font-size:16px}
 .boardPanel .list::-webkit-scrollbar{width:8px}
 .boardPanel .list::-webkit-scrollbar-thumb{background:rgba(70,214,163,.25);border-radius:999px;border:2px solid transparent;background-clip:padding-box}
 .panelTitle{

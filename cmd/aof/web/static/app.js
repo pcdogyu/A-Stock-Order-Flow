@@ -17,6 +17,7 @@ async function postJSON(url, payload) {
 
 function setPill(ok, msg) {
   const pill = document.getElementById("pill");
+  if (!pill) return;
   pill.classList.toggle("ok", ok);
   pill.classList.toggle("bad", !ok);
   pill.textContent = msg;
@@ -42,7 +43,7 @@ function fillConfig(cfg) {
   document.getElementById("conTop").value = cfg.concept?.top_size ?? 100;
 
   document.getElementById("aggEnabled").checked = !!cfg.market_agg?.enabled;
-  document.getElementById("aggInterval").value = cfg.market_agg?.interval_seconds ?? 60;
+  document.getElementById("aggInterval").value = cfg.market_agg?.interval_seconds ?? 120;
   document.getElementById("aggConc").value = cfg.market_agg?.concurrency ?? 4;
 
   document.getElementById("watchlist").value = (cfg.watchlist || []).join("\n");
@@ -232,6 +233,152 @@ function renderHistoryChart(meta, rows) {
   drawLineChart(canvas, labels, values);
 }
 
+function clearCanvas(canvas) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 600;
+  const h = canvas.clientHeight || 160;
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+}
+
+function drawSparkline(canvas, labels, values) {
+  if (!canvas) return;
+  const parentW = canvas.clientWidth || 600;
+  const parentH = canvas.clientHeight || 160;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(parentW * dpr);
+  canvas.height = Math.floor(parentH * dpr);
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const stroke = colorVar("--stroke", "#223042");
+  const muted = colorVar("--muted", "#a8b4c6");
+  const accent = colorVar("--accent", "#46d6a3");
+
+  ctx.clearRect(0, 0, parentW, parentH);
+  ctx.fillStyle = "#0b1018";
+  ctx.fillRect(0, 0, parentW, parentH);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, parentW - 1, parentH - 1);
+
+  const n = Math.min(labels.length, values.length);
+  if (n < 2) {
+    ctx.fillStyle = muted;
+    ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+    ctx.fillText("no data", 12, 20);
+    return;
+  }
+
+  const padL = 10, padR = 10, padT = 10, padB = 22;
+  const w = parentW - padL - padR;
+  const h = parentH - padT - padB;
+
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const y = Number(values[i]);
+    if (!Number.isFinite(y)) continue;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+  if (minY === maxY) {
+    minY -= 1;
+    maxY += 1;
+  } else {
+    const pad = (maxY - minY) * 0.06;
+    minY -= pad;
+    maxY += pad;
+  }
+
+  const xAt = (i) => padL + (i / (n - 1)) * w;
+  const yAt = (v) => padT + (1 - (v - minY) / (maxY - minY)) * h;
+
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const v = Number(values[i]);
+    const x = xAt(i);
+    const y = yAt(v);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = muted;
+  ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+  ctx.textAlign = "left";
+  ctx.fillText(String(labels[0] ?? ""), padL, parentH - 8);
+  ctx.textAlign = "right";
+  ctx.fillText(String(labels[n - 1] ?? ""), parentW - padR, parentH - 8);
+  ctx.textAlign = "left";
+}
+
+async function loadSparkForBoard(type, boardCode, boardName) {
+  const canvasId = type === "industry" ? "sparkInd" : "sparkCon";
+  const titleId = type === "industry" ? "sparkTitleInd" : "sparkTitleCon";
+  const canvas = document.getElementById(canvasId);
+  const title = document.getElementById(titleId);
+  if (!canvas || !title) return;
+
+  if (!boardCode) {
+    title.textContent = "成份股走势：-";
+    clearCanvas(canvas);
+    return;
+  }
+
+  title.textContent = "成份股走势：loading...";
+  try {
+    const data = await getJSON(`/api/board/constituents?board=${encodeURIComponent(boardCode)}&pn=1&pz=1`);
+    const stock = (data?.rows || [])[0];
+    if (!stock || !(stock.code || stock.Code)) {
+      title.textContent = "成份股走势：-";
+      clearCanvas(canvas);
+      return;
+    }
+    const code = stock.code || stock.Code;
+    const name = stock.name || stock.Name || "";
+    const pct = stock.pct ?? stock.Pct;
+    const trend = await getJSON(`/api/stock/trend?code=${encodeURIComponent(code)}`);
+    const pts = trend?.points || [];
+    if (!Array.isArray(pts) || pts.length < 2) {
+      title.textContent = `成份股走势（${boardName || boardCode}）：${name} ${code}（无数据）`;
+      clearCanvas(canvas);
+      return;
+    }
+
+    const labels = pts.map(p => String(p.ts || p.TS || "").slice(11, 16)); // "HH:mm"
+    const values = pts.map(p => Number(p.price ?? p.Price));
+    const pctTxt = Number.isFinite(Number(pct)) ? ` ${(Number(pct)).toFixed(2)}%` : "";
+    title.textContent = `成份股走势（${boardName || boardCode}）：${name} ${code}${pctTxt}`;
+    drawSparkline(canvas, labels, values);
+
+    state.sparkByType[type] = { board: boardCode, stock: { code, name }, points: pts };
+  } catch (e) {
+    console.error(e);
+    title.textContent = `成份股走势（${boardName || boardCode}）：加载失败`;
+    clearCanvas(canvas);
+  }
+}
+
+function renderSparkFromCache(type) {
+  const canvasId = type === "industry" ? "sparkInd" : "sparkCon";
+  const canvas = document.getElementById(canvasId);
+  const cached = state.sparkByType?.[type];
+  if (!canvas || !cached || !Array.isArray(cached.points) || cached.points.length < 2) return;
+  const labels = cached.points.map(p => String(p.ts || p.TS || "").slice(11, 16));
+  const values = cached.points.map(p => Number(p.price ?? p.Price));
+  drawSparkline(canvas, labels, values);
+}
+
 function setText(id, v) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -322,6 +469,10 @@ let state = {
   boardPZ: 30,
   historyMeta: null,
   historyRows: null,
+  sparkByType: {
+    industry: { board: null, stock: null, points: null },
+    concept: { board: null, stock: null, points: null },
+  },
 };
 
 function clearTimers() {
@@ -357,9 +508,16 @@ async function refreshBuildInfo() {
 function wire() {
   window.addEventListener("hashchange", () => bootRoute());
   window.addEventListener("resize", () => {
-    if (getRoute() !== "history") return;
-    if (state.historyMeta && state.historyRows) {
-      renderHistoryChart(state.historyMeta, state.historyRows);
+    const route = getRoute();
+    if (route === "history") {
+      if (state.historyMeta && state.historyRows) {
+        renderHistoryChart(state.historyMeta, state.historyRows);
+      }
+      return;
+    }
+    if (route === "home") {
+      renderSparkFromCache("industry");
+      renderSparkFromCache("concept");
     }
   });
 
@@ -502,17 +660,28 @@ async function loadBoardsFor(type, listId, hintId) {
     div.dataset.code = b.code;
     div.innerHTML = `<div class="name">${b.name} <span class="code">${b.code}</span></div><div class="val">${fmtMoney(b.value)}</div>`;
     div.addEventListener("click", async () => {
-      document.querySelectorAll(".boardPanel .item").forEach(x => x.classList.remove("active"));
+      list.querySelectorAll(".item").forEach(x => x.classList.remove("active"));
       div.classList.add("active");
       state.boardType = type;
       state.boardCode = b.code;
       state.boardPN = 1;
       const sel = document.getElementById("boardSel");
       if (sel) sel.textContent = `${b.name} (${b.code})`;
+      try { await loadSparkForBoard(type, b.code, b.name); } catch {}
       await loadConstituents();
     });
     list.appendChild(div);
   });
+
+  // Auto-render a sparkline for the first board in each list.
+  if (boards.length > 0 && !state.sparkByType?.[type]?.board) {
+    const first = boards[0];
+    if (first && first.code) {
+      const firstEl = list.querySelector(".item");
+      if (firstEl) firstEl.classList.add("active");
+      await loadSparkForBoard(type, first.code, first.name);
+    }
+  }
 }
 
 async function loadConstituents() {
