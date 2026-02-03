@@ -6,14 +6,31 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // The clist endpoint returns a dynamic field keyed by fid (e.g. "f62").
 // To keep the rest of the code strongly typed we decode into map[string]any for each diff row.
 
 func (c *Client) TopListDynamic(ctx context.Context, fs, fid string, size int) ([]TopItem, error) {
-	_, items, err := c.clistPage(ctx, fs, fid, 1, size)
-	return items, err
+	var lastErr error
+	backoff := 200 * time.Millisecond
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+				backoff *= 2
+			}
+		}
+		_, items, err := c.clistPage(ctx, fs, fid, 1, size)
+		if err == nil {
+			return items, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 func (c *Client) BoardListAll(ctx context.Context, fs, fid string) ([]TopItem, error) {
@@ -66,7 +83,7 @@ func (c *Client) clistPage(ctx context.Context, fs, fid string, pn, pz int) (tot
 		RC   int `json:"rc"`
 		Data *struct {
 			Total int               `json:"total"`
-			Diff []json.RawMessage `json:"diff"`
+			Diff  []json.RawMessage `json:"diff"`
 		} `json:"data"`
 	}
 	if err := c.getJSON(ctx, u, &raw); err != nil {
@@ -93,13 +110,13 @@ func (c *Client) clistPage(ctx context.Context, fs, fid string, pn, pz int) (tot
 }
 
 type QuoteItem struct {
-	Code  string  `json:"code"`
-	Name  string  `json:"name"`
-	Price float64 `json:"price"`
-	Pct   float64 `json:"pct"`
-	Open  float64 `json:"open"`
-	High  float64 `json:"high"`
-	Low   float64 `json:"low"`
+	Code     string  `json:"code"`
+	Name     string  `json:"name"`
+	Price    float64 `json:"price"`
+	Pct      float64 `json:"pct"`
+	Open     float64 `json:"open"`
+	High     float64 `json:"high"`
+	Low      float64 `json:"low"`
 	PreClose float64 `json:"pre_close"`
 }
 
@@ -133,40 +150,59 @@ func (c *Client) BoardConstituents(ctx context.Context, boardCode string, pn, pz
 	q.Set("fields", "f12,f14,f2,f3,f17,f15,f16,f18")
 	u = u + "?" + q.Encode()
 
-	var raw struct {
-		RC   int `json:"rc"`
-		Data *struct {
-			Total int               `json:"total"`
-			Diff []json.RawMessage `json:"diff"`
-		} `json:"data"`
-	}
-	if err := c.getJSON(ctx, u, &raw); err != nil {
-		return 0, nil, err
-	}
-	if raw.RC != 0 || raw.Data == nil {
-		return 0, nil, fmt.Errorf("unexpected response rc=%d", raw.RC)
-	}
+	var lastErr error
+	backoff := 200 * time.Millisecond
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return 0, nil, ctx.Err()
+			case <-time.After(backoff):
+				backoff *= 2
+			}
+		}
 
-	out := make([]QuoteItem, 0, len(raw.Data.Diff))
-	for _, msg := range raw.Data.Diff {
-		var m map[string]any
-		if err := json.Unmarshal(msg, &m); err != nil {
+		var raw struct {
+			RC   int `json:"rc"`
+			Data *struct {
+				Total int               `json:"total"`
+				Diff  []json.RawMessage `json:"diff"`
+			} `json:"data"`
+		}
+		if err := c.getJSON(ctx, u, &raw); err != nil {
+			lastErr = err
 			continue
 		}
-		code, _ := m["f12"].(string)
-		name, _ := m["f14"].(string)
-		out = append(out, QuoteItem{
-			Code:     code,
-			Name:     name,
-			Price:    asFloat(m["f2"]),
-			Pct:      asFloat(m["f3"]),
-			Open:     asFloat(m["f17"]),
-			High:     asFloat(m["f15"]),
-			Low:      asFloat(m["f16"]),
-			PreClose: asFloat(m["f18"]),
-		})
+		if raw.RC != 0 || raw.Data == nil {
+			lastErr = fmt.Errorf("unexpected response rc=%d", raw.RC)
+			continue
+		}
+
+		out := make([]QuoteItem, 0, len(raw.Data.Diff))
+		for _, msg := range raw.Data.Diff {
+			var m map[string]any
+			if err := json.Unmarshal(msg, &m); err != nil {
+				continue
+			}
+			code, _ := m["f12"].(string)
+			name, _ := m["f14"].(string)
+			out = append(out, QuoteItem{
+				Code:     code,
+				Name:     name,
+				Price:    asFloat(m["f2"]),
+				Pct:      asFloat(m["f3"]),
+				Open:     asFloat(m["f17"]),
+				High:     asFloat(m["f15"]),
+				Low:      asFloat(m["f16"]),
+				PreClose: asFloat(m["f18"]),
+			})
+		}
+		return raw.Data.Total, out, nil
 	}
-	return raw.Data.Total, out, nil
+	if lastErr == nil {
+		lastErr = fmt.Errorf("unknown error")
+	}
+	return 0, nil, lastErr
 }
 
 func asFloat(v any) float64 {

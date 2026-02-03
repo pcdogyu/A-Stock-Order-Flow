@@ -62,6 +62,10 @@ func (c *Client) NorthboundRealtime(ctx context.Context) (NorthboundRT, error) {
 			NetBuyAmt:   resp.Data.HK2SH.NetBuyAmt,
 			BuyAmt:      resp.Data.HK2SH.BuyAmt,
 			SellAmt:     resp.Data.HK2SH.SellAmt,
+			DayAmtRemain:    resp.Data.HK2SH.DayAmtRemain,
+			DayAmtThreshold: resp.Data.HK2SH.DayAmtThreshold,
+			BuySellAmt:      resp.Data.HK2SH.BuySellAmt,
+			BuySellAmtDate:  resp.Data.HK2SH.BuySellAmtDate,
 			UpdateTime:  resp.Data.HK2SH.UpdateTime,
 		},
 		SZ: NorthboundLeg{
@@ -69,6 +73,10 @@ func (c *Client) NorthboundRealtime(ctx context.Context) (NorthboundRT, error) {
 			NetBuyAmt:   resp.Data.HK2SZ.NetBuyAmt,
 			BuyAmt:      resp.Data.HK2SZ.BuyAmt,
 			SellAmt:     resp.Data.HK2SZ.SellAmt,
+			DayAmtRemain:    resp.Data.HK2SZ.DayAmtRemain,
+			DayAmtThreshold: resp.Data.HK2SZ.DayAmtThreshold,
+			BuySellAmt:      resp.Data.HK2SZ.BuySellAmt,
+			BuySellAmtDate:  resp.Data.HK2SZ.BuySellAmtDate,
 			UpdateTime:  resp.Data.HK2SZ.UpdateTime,
 		},
 	}

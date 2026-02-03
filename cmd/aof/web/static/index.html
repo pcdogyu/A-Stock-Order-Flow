@@ -9,11 +9,16 @@
   <body>
     <main class="wrap">
       <div class="topbar">
-        <nav class="nav" id="nav">
-          <a class="tab" href="#/home" data-route="home">首页</a>
-          <a class="tab" href="#/history" data-route="history">历史资金流量</a>
-          <a class="tab" href="#/settings" data-route="settings">设置</a>
-        </nav>
+        <div class="topbarRow">
+          <nav class="nav" id="nav">
+            <a class="tab" href="#/home" data-route="home">首页</a>
+            <a class="tab" href="#/history" data-route="history">历史资金流量</a>
+            <a class="tab" href="#/settings" data-route="settings">设置</a>
+          </nav>
+          <div class="topbarActions">
+            <button class="chip" id="themeToggle" type="button">浅色</button>
+          </div>
+        </div>
       </div>
 
 
@@ -29,19 +34,19 @@
             <div class="panelTitle">北向资金（当日）</div>
             <div class="kv">
               <div><span class="label">更新时间(北京时间)</span> <span class="mono" id="rtTs">-</span></div>
-              <div><span class="label">沪股通 净买入</span> <span class="mono" id="nbSh">-</span></div>
-              <div><span class="label">深股通 净买入</span> <span class="mono" id="nbSz">-</span></div>
+              <div><span class="label">沪股通 额度占比(%)</span> <span class="mono" id="nbShQuotaPct">-</span></div>
+              <div><span class="label">沪股通 额度余额(亿元)</span> <span class="mono" id="nbShQuota">-</span></div>
+              <div><span class="label">沪股通 成交总额(亿元)</span> <span class="mono" id="nbShTurnover">-</span></div>
+              <div><span class="label">深股通 额度占比(%)</span> <span class="mono" id="nbSzQuotaPct">-</span></div>
+              <div><span class="label">深股通 额度余额(亿元)</span> <span class="mono" id="nbSzQuota">-</span></div>
+              <div><span class="label">深股通 成交总额(亿元)</span> <span class="mono" id="nbSzTurnover">-</span></div>
             </div>
-            <div class="hint tiny" id="nbHint" hidden>提示：北向资金盘中成交额/净买入等数据可能因交易所披露规则调整而暂停或延迟。</div>
+            <div class="hint tiny" id="nbHint">提示：额度余额仅在低于 30% 时披露；成交总额通常盘后披露。</div>
           </div>
 
           <div class="panel">
-            <div class="panelTitle">全市场汇总（f62）</div>
-            <div class="kv">
-              <div><span class="label">行业求和</span> <span class="mono" id="aggIndustry">-</span></div>
-              <div><span class="label">全A分页求和</span> <span class="mono" id="aggAll">-</span></div>
-            </div>
-            <div class="hint tiny">如果某项显示为 -，说明该源最近一次抓取失败/尚未抓到。</div>
+            <div class="panelTitle">行业求和（折线图）</div>
+            <canvas id="homeIndustryChart" class="chartCanvas" height="240"></canvas>
           </div>
         </div>
 
@@ -62,52 +67,15 @@
 
         <div class="grid grid2" style="margin-top:12px">
           <div class="panel boardPanel">
-            <div class="panelTitle">行业板块</div>
+            <div class="panelTitle">行业板块（今日折线）</div>
             <div class="hint tiny" id="boardHintInd" hidden></div>
-            <div class="list" id="boardListInd"></div>
-            <div class="spark">
-              <div class="row rowSpread">
-                <div class="mono dim" id="sparkTitleInd">成份股走势：-</div>
-              </div>
-              <canvas id="sparkInd" class="sparkCanvas" height="160"></canvas>
-            </div>
+            <div class="boardGrid" id="boardGridInd"></div>
           </div>
 
           <div class="panel boardPanel">
-            <div class="panelTitle">概念板块</div>
+            <div class="panelTitle">概念板块（今日折线）</div>
             <div class="hint tiny" id="boardHintCon" hidden></div>
-            <div class="list" id="boardListCon"></div>
-            <div class="spark">
-              <div class="row rowSpread">
-                <div class="mono dim" id="sparkTitleCon">成份股走势：-</div>
-              </div>
-              <canvas id="sparkCon" class="sparkCanvas" height="160"></canvas>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid grid2" style="margin-top:12px">
-          <div class="panel constPanel">
-            <div class="panelTitle">成份股今日走势</div>
-            <div class="row rowSpread">
-              <div class="mono dim" id="boardSel">未选择</div>
-              <div class="row">
-                <button class="chip" id="btnPrev" type="button">上一页</button>
-                <button class="chip" id="btnNext" type="button">下一页</button>
-              </div>
-            </div>
-            <div class="tableWrap" style="margin-top:10px">
-              <table class="tbl" id="tblCon">
-                <thead>
-                  <tr>
-                    <th>代码</th><th>名称</th>
-                    <th class="num">现价</th><th class="num">涨跌幅</th>
-                    <th class="num">开盘</th><th class="num">最高</th><th class="num">最低</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
+            <div class="boardGrid" id="boardGridCon"></div>
           </div>
         </div>
       </section>
@@ -136,13 +104,13 @@
           </label>
           <label class="field">
             <span>limit</span>
-            <input type="number" min="10" max="2000" step="10" id="histLimit" value="200" />
+            <input type="number" min="10" max="2000" step="10" id="histLimit" value="90" />
           </label>
           <button type="submit" class="btn primary">加载</button>
         </form>
 
         <div class="panel" style="margin-top:12px" id="histChartPanel" hidden>
-          <div class="panelTitle">行业求和（折线图）</div>
+          <div class="panelTitle">近 90 天（折线）</div>
           <canvas id="histChart" class="chartCanvas" height="240"></canvas>
         </div>
 
@@ -174,11 +142,15 @@
           <form id="formRealtime" class="grid">
             <label class="field">
               <span>主循环间隔</span>
-              <input type="number" min="1" max="600" step="1" id="rtInterval" />
+              <input type="number" min="1" max="600" step="1" id="rtInterval" value="20" />
             </label>
             <label class="field fieldToggle">
               <span>仅交易时段采集</span>
               <input type="checkbox" id="onlyTradeHours" />
+            </label>
+            <label class="field">
+              <span>榜单数量(Top)</span>
+              <input type="number" min="5" max="100" step="1" id="topSize" value="10" />
             </label>
             <button type="submit" class="btn primary">保存实时设置</button>
           </form>

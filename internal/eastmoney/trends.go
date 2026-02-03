@@ -18,7 +18,26 @@ func (c *Client) StockTrends1D(ctx context.Context, secid string) ([]TrendPoint,
 		return nil, fmt.Errorf("secid is required")
 	}
 
-	u := "https://push2.eastmoney.com/api/qt/stock/trends2/get"
+	return fetchTrends(ctx, c, "https://push2.eastmoney.com/api/qt/stock/trends2/get", secid)
+}
+
+// BoardTrends1D returns today's intraday trend points for a board code (e.g. "BK0457").
+// Eastmoney uses "90.BKxxxx" as secid for boards.
+func (c *Client) BoardTrends1D(ctx context.Context, boardCode string) ([]TrendPoint, error) {
+	if boardCode == "" {
+		return nil, fmt.Errorf("boardCode is required")
+	}
+	secid := "90." + boardCode
+	out, err := fetchTrends(ctx, c, "https://push2his.eastmoney.com/api/qt/stock/trends2/get", secid)
+	if err == nil {
+		return out, nil
+	}
+	// Fallback to push2 domain if push2his fails.
+	return fetchTrends(ctx, c, "https://push2.eastmoney.com/api/qt/stock/trends2/get", secid)
+}
+
+func fetchTrends(ctx context.Context, c *Client, baseURL, secid string) ([]TrendPoint, error) {
+	u := baseURL
 	q := url.Values{}
 	q.Set("secid", secid)
 	q.Set("ndays", "1")
@@ -55,4 +74,3 @@ func (c *Client) StockTrends1D(ctx context.Context, secid string) ([]TrendPoint,
 	}
 	return out, nil
 }
-

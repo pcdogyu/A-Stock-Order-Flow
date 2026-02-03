@@ -9,6 +9,10 @@ type NorthboundLeg struct {
 	NetBuyAmt   float64
 	BuyAmt      float64
 	SellAmt     float64
+	DayAmtRemain    float64
+	DayAmtThreshold float64
+	BuySellAmt      float64
+	BuySellAmtDate  int64
 	UpdateTime  int64
 }
 
@@ -78,10 +82,14 @@ type kamtResp struct {
 type kamtLeg struct {
 	Date2       string  `json:"date2"`
 	DayNetAmtIn float64 `json:"dayNetAmtIn"`
+	DayAmtRemain    float64 `json:"dayAmtRemain"`
+	DayAmtThreshold float64 `json:"dayAmtThreshold"`
 	BuyAmt      float64 `json:"buyAmt"`
 	SellAmt     float64 `json:"sellAmt"`
+	BuySellAmt  float64 `json:"buySellAmt"`
 	NetBuyAmt   float64 `json:"netBuyAmt"`
 	UpdateTime  int64   `json:"updateTime"`
+	BuySellAmtDate int64 `json:"buySellAmtDate"`
 }
 
 type ulistResp struct {
@@ -167,4 +175,3 @@ func formatDatacenterDate(s string) string {
 	}
 	return s
 }
-

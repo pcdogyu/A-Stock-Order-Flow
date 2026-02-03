@@ -23,6 +23,26 @@ function setPill(ok, msg) {
   pill.textContent = msg;
 }
 
+function initThemeToggle() {
+  const key = "aof_theme";
+  const btn = document.getElementById("themeToggle");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  let theme = localStorage.getItem(key) || (prefersDark ? "dark" : "light");
+  if (theme !== "dark" && theme !== "light") theme = "dark";
+  const apply = (t) => {
+    document.documentElement.setAttribute("data-theme", t);
+    localStorage.setItem(key, t);
+    if (btn) btn.textContent = (t === "dark" ? "浅色" : "深色");
+  };
+  apply(theme);
+  if (btn) {
+    btn.addEventListener("click", () => {
+      const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      apply(next);
+    });
+  }
+}
+
 function splitWatchlist(text) {
   return text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 }
@@ -31,8 +51,9 @@ function fillConfig(cfg) {
   document.getElementById("dbPath").textContent = cfg.db_path || "-";
   document.getElementById("wlCount").textContent = String((cfg.watchlist || []).length);
 
-  document.getElementById("rtInterval").value = cfg.realtime?.interval_seconds ?? 10;
+  document.getElementById("rtInterval").value = cfg.realtime?.interval_seconds ?? 20;
   document.getElementById("onlyTradeHours").checked = !!cfg.realtime?.only_during_trading_hours;
+  document.getElementById("topSize").value = cfg.toplist?.size ?? 10;
 
   document.getElementById("indEnabled").checked = !!cfg.industry?.enabled;
   document.getElementById("indInterval").value = cfg.industry?.interval_seconds ?? 10;
@@ -56,6 +77,13 @@ function fmtMoney(v) {
   if (abs >= 1e8) return (v / 1e8).toFixed(2) + "亿";
   if (abs >= 1e4) return (v / 1e4).toFixed(2) + "万";
   return String(Math.round(v));
+}
+
+function fmtYi(v) {
+  if (v === null || v === undefined) return "-";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "-";
+  return (n / 1e8).toFixed(2);
 }
 
 function fmtBJTime(isoLike) {
@@ -208,175 +236,21 @@ function renderHistoryChart(meta, rows) {
   const panel = document.getElementById("histChartPanel");
   const canvas = document.getElementById("histChart");
   if (!panel || !canvas) return;
-
-  const source = meta?.source || "";
   const kind = meta?.kind || "daily";
-  const show = source === "industry_sum";
-  panel.hidden = !show;
-  if (!show) return;
-
+  if (kind !== "daily") {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
   const labels = [];
   const values = [];
-  (rows || []).forEach(r => {
+  (rows || []).slice(-90).forEach(r => {
     const v = Number(r.value ?? r.Value);
     if (!Number.isFinite(v)) return;
-    if (kind === "rt") {
-      const t = fmtBJTime(r.ts_utc || r.TSUTC || "");
-      labels.push(t === "-" ? "-" : t.slice(5, 16)); // "MM-DD HH:mm"
-      values.push(v);
-    } else {
-      labels.push(r.trade_date || r.TradeDate || "-");
-      values.push(v);
-    }
+    labels.push(r.trade_date || r.TradeDate || "-");
+    values.push(v);
   });
-
   drawLineChart(canvas, labels, values);
-}
-
-function clearCanvas(canvas) {
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth || 600;
-  const h = canvas.clientHeight || 160;
-  canvas.width = Math.floor(w * dpr);
-  canvas.height = Math.floor(h * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-}
-
-function drawSparkline(canvas, labels, values) {
-  if (!canvas) return;
-  const parentW = canvas.clientWidth || 600;
-  const parentH = canvas.clientHeight || 160;
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.floor(parentW * dpr);
-  canvas.height = Math.floor(parentH * dpr);
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  const stroke = colorVar("--stroke", "#223042");
-  const muted = colorVar("--muted", "#a8b4c6");
-  const accent = colorVar("--accent", "#46d6a3");
-
-  ctx.clearRect(0, 0, parentW, parentH);
-  ctx.fillStyle = "#0b1018";
-  ctx.fillRect(0, 0, parentW, parentH);
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, parentW - 1, parentH - 1);
-
-  const n = Math.min(labels.length, values.length);
-  if (n < 2) {
-    ctx.fillStyle = muted;
-    ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-    ctx.fillText("no data", 12, 20);
-    return;
-  }
-
-  const padL = 10, padR = 10, padT = 10, padB = 22;
-  const w = parentW - padL - padR;
-  const h = parentH - padT - padB;
-
-  let minY = Infinity, maxY = -Infinity;
-  for (let i = 0; i < n; i++) {
-    const y = Number(values[i]);
-    if (!Number.isFinite(y)) continue;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  }
-  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) return;
-  if (minY === maxY) {
-    minY -= 1;
-    maxY += 1;
-  } else {
-    const pad = (maxY - minY) * 0.06;
-    minY -= pad;
-    maxY += pad;
-  }
-
-  const xAt = (i) => padL + (i / (n - 1)) * w;
-  const yAt = (v) => padT + (1 - (v - minY) / (maxY - minY)) * h;
-
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    const v = Number(values[i]);
-    const x = xAt(i);
-    const y = yAt(v);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  ctx.fillStyle = muted;
-  ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-  ctx.textAlign = "left";
-  ctx.fillText(String(labels[0] ?? ""), padL, parentH - 8);
-  ctx.textAlign = "right";
-  ctx.fillText(String(labels[n - 1] ?? ""), parentW - padR, parentH - 8);
-  ctx.textAlign = "left";
-}
-
-async function loadSparkForBoard(type, boardCode, boardName) {
-  const canvasId = type === "industry" ? "sparkInd" : "sparkCon";
-  const titleId = type === "industry" ? "sparkTitleInd" : "sparkTitleCon";
-  const canvas = document.getElementById(canvasId);
-  const title = document.getElementById(titleId);
-  if (!canvas || !title) return;
-
-  if (!boardCode) {
-    title.textContent = "成份股走势：-";
-    clearCanvas(canvas);
-    return;
-  }
-
-  title.textContent = "成份股走势：loading...";
-  try {
-    const data = await getJSON(`/api/board/constituents?board=${encodeURIComponent(boardCode)}&pn=1&pz=1`);
-    const stock = (data?.rows || [])[0];
-    if (!stock || !(stock.code || stock.Code)) {
-      title.textContent = "成份股走势：-";
-      clearCanvas(canvas);
-      return;
-    }
-    const code = stock.code || stock.Code;
-    const name = stock.name || stock.Name || "";
-    const pct = stock.pct ?? stock.Pct;
-    const trend = await getJSON(`/api/stock/trend?code=${encodeURIComponent(code)}`);
-    const pts = trend?.points || [];
-    if (!Array.isArray(pts) || pts.length < 2) {
-      title.textContent = `成份股走势（${boardName || boardCode}）：${name} ${code}（无数据）`;
-      clearCanvas(canvas);
-      return;
-    }
-
-    const labels = pts.map(p => String(p.ts || p.TS || "").slice(11, 16)); // "HH:mm"
-    const values = pts.map(p => Number(p.price ?? p.Price));
-    const pctTxt = Number.isFinite(Number(pct)) ? ` ${(Number(pct)).toFixed(2)}%` : "";
-    title.textContent = `成份股走势（${boardName || boardCode}）：${name} ${code}${pctTxt}`;
-    drawSparkline(canvas, labels, values);
-
-    state.sparkByType[type] = { board: boardCode, stock: { code, name }, points: pts };
-  } catch (e) {
-    console.error(e);
-    title.textContent = `成份股走势（${boardName || boardCode}）：加载失败`;
-    clearCanvas(canvas);
-  }
-}
-
-function renderSparkFromCache(type) {
-  const canvasId = type === "industry" ? "sparkInd" : "sparkCon";
-  const canvas = document.getElementById(canvasId);
-  const cached = state.sparkByType?.[type];
-  if (!canvas || !cached || !Array.isArray(cached.points) || cached.points.length < 2) return;
-  const labels = cached.points.map(p => String(p.ts || p.TS || "").slice(11, 16));
-  const values = cached.points.map(p => Number(p.price ?? p.Price));
-  drawSparkline(canvas, labels, values);
 }
 
 function setText(id, v) {
@@ -390,26 +264,38 @@ function fillRealtime(snap, cfg) {
   setText("rtTs", ts);
 
   const nb = snap?.northbound;
-  const nbHint = document.getElementById("nbHint");
   if (!nb) {
-    setText("nbSh", "-");
-    setText("nbSz", "-");
-    if (nbHint) nbHint.hidden = true;
+    setText("nbShQuotaPct", "-");
+    setText("nbShQuota", "-");
+    setText("nbShTurnover", "-");
+    setText("nbSzQuotaPct", "-");
+    setText("nbSzQuota", "-");
+    setText("nbSzTurnover", "-");
   } else {
-    const sh = nb.SH?.NetBuyAmt ?? nb.sh?.netBuyAmt ?? nb.sh?.net_buy_amt;
-    const sz = nb.SZ?.NetBuyAmt ?? nb.sz?.netBuyAmt ?? nb.sz?.net_buy_amt;
-    const shBuy = nb.SH?.BuyAmt ?? nb.sh?.buyAmt ?? nb.sh?.buy_amt;
-    const shSell = nb.SH?.SellAmt ?? nb.sh?.sellAmt ?? nb.sh?.sell_amt;
-    const szBuy = nb.SZ?.BuyAmt ?? nb.sz?.buyAmt ?? nb.sz?.buy_amt;
-    const szSell = nb.SZ?.SellAmt ?? nb.sz?.sellAmt ?? nb.sz?.sell_amt;
-    const looksWithheld = (v) => (v === 0 || v === "0" || v === "0.0");
-    const withheld =
-      looksWithheld(sh) && looksWithheld(sz) &&
-      looksWithheld(shBuy) && looksWithheld(shSell) &&
-      looksWithheld(szBuy) && looksWithheld(szSell);
-    setText("nbSh", withheld ? "-" : fmtMoney(Number(sh)));
-    setText("nbSz", withheld ? "-" : fmtMoney(Number(sz)));
-    if (nbHint) nbHint.hidden = !withheld;
+    const shRemain = nb.SH?.DayAmtRemain ?? nb.sh?.dayAmtRemain ?? nb.sh?.day_amt_remain;
+    const shThreshold = nb.SH?.DayAmtThreshold ?? nb.sh?.dayAmtThreshold ?? nb.sh?.day_amt_threshold;
+    const shTurnover = nb.SH?.BuySellAmt ?? nb.sh?.buySellAmt ?? nb.sh?.buy_sell_amt;
+    const szRemain = nb.SZ?.DayAmtRemain ?? nb.sz?.dayAmtRemain ?? nb.sz?.day_amt_remain;
+    const szThreshold = nb.SZ?.DayAmtThreshold ?? nb.sz?.dayAmtThreshold ?? nb.sz?.day_amt_threshold;
+    const szTurnover = nb.SZ?.BuySellAmt ?? nb.sz?.buySellAmt ?? nb.sz?.buy_sell_amt;
+
+    const fmtQuota = (remain, threshold) => {
+      const r = Number(remain);
+      const t = Number(threshold);
+      if (!Number.isFinite(r) || !Number.isFinite(t) || t <= 0) return { pct: "-", remain: "-" };
+      const ratio = r / t;
+      if (ratio >= 0.3) return { pct: (ratio * 100).toFixed(2), remain: "充足" };
+      return { pct: (ratio * 100).toFixed(2), remain: fmtYi(r) };
+    };
+
+    const shq = fmtQuota(shRemain, shThreshold);
+    const szq = fmtQuota(szRemain, szThreshold);
+    setText("nbShQuotaPct", shq.pct);
+    setText("nbSzQuotaPct", szq.pct);
+    setText("nbShQuota", shq.remain);
+    setText("nbSzQuota", szq.remain);
+    setText("nbShTurnover", Number(shTurnover) > 0 ? fmtYi(Number(shTurnover)) : "-");
+    setText("nbSzTurnover", Number(szTurnover) > 0 ? fmtYi(Number(szTurnover)) : "-");
   }
 
   const agg = snap?.agg_by_key || {};
@@ -463,15 +349,12 @@ function getRoute() {
 let state = {
   cfg: null,
   timers: [],
-  boardType: "industry",
-  boardCode: null,
-  boardPN: 1,
-  boardPZ: 30,
   historyMeta: null,
   historyRows: null,
-  sparkByType: {
-    industry: { board: null, stock: null, points: null },
-    concept: { board: null, stock: null, points: null },
+  homeChartRows: null,
+  boardCharts: {
+    industry: new Map(),
+    concept: new Map(),
   },
 };
 
@@ -506,6 +389,7 @@ async function refreshBuildInfo() {
 }
 
 function wire() {
+  initThemeToggle();
   window.addEventListener("hashchange", () => bootRoute());
   window.addEventListener("resize", () => {
     const route = getRoute();
@@ -515,28 +399,22 @@ function wire() {
       }
       return;
     }
+    if (route === "home" && state.homeChartRows) {
+      renderIndustryChartHome(state.homeChartRows);
+    }
     if (route === "home") {
-      renderSparkFromCache("industry");
-      renderSparkFromCache("concept");
+      renderBoardChartsFromCache("industry");
+      renderBoardChartsFromCache("concept");
     }
   });
 
-  document.getElementById("btnPrev")?.addEventListener("click", async () => {
-    if (!state.boardCode) return;
-    if (state.boardPN > 1) state.boardPN--;
-    try { await loadConstituents(); } catch (e) { console.error(e); }
-  });
-  document.getElementById("btnNext")?.addEventListener("click", async () => {
-    if (!state.boardCode) return;
-    state.boardPN++;
-    try { await loadConstituents(); } catch (e) { console.error(e); }
-  });
 
   document.getElementById("formRealtime").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const payload = {
       realtime_interval_seconds: Number(document.getElementById("rtInterval").value),
       only_during_trading_hours: document.getElementById("onlyTradeHours").checked,
+      toplist_size: Number(document.getElementById("topSize").value),
     };
     try {
       setPill(true, "saving...");
@@ -628,19 +506,9 @@ async function refreshRealtimeOnce() {
   }
 }
 
-function setBoardType(tp) {
-  state.boardType = tp;
-  state.boardCode = null;
-  state.boardPN = 1;
-  const sel = document.getElementById("boardSel");
-  if (sel) sel.textContent = "未选择";
-  const tbody = document.querySelector("#tblCon tbody");
-  if (tbody) tbody.innerHTML = "";
-}
-
-async function loadBoardsFor(type, listId, hintId) {
+async function loadBoardsFor(type, _listId, hintId) {
   const fid = (type === "concept" ? state.cfg?.concept?.fid : state.cfg?.industry?.fid) || "f62";
-  const url = `/api/boards?type=${encodeURIComponent(type)}&fid=${encodeURIComponent(fid)}&limit=50`;
+  const url = `/api/boards?type=${encodeURIComponent(type)}&fid=${encodeURIComponent(fid)}&limit=500`;
   const data = await getJSON(url);
   const boards = Array.isArray(data) ? data : (data.rows || []);
   const boardHint = document.getElementById(hintId);
@@ -651,59 +519,96 @@ async function loadBoardsFor(type, listId, hintId) {
       boardHint.textContent = "市场休市或未抓到快照，已即时拉取板块数据。";
     }
   }
-  const list = document.getElementById(listId);
-  if (!list) return;
-  list.innerHTML = "";
-  boards.forEach(b => {
-    const div = document.createElement("div");
-    div.className = "item";
-    div.dataset.code = b.code;
-    div.innerHTML = `<div class="name">${b.name} <span class="code">${b.code}</span></div><div class="val">${fmtMoney(b.value)}</div>`;
-    div.addEventListener("click", async () => {
-      list.querySelectorAll(".item").forEach(x => x.classList.remove("active"));
-      div.classList.add("active");
-      state.boardType = type;
-      state.boardCode = b.code;
-      state.boardPN = 1;
-      const sel = document.getElementById("boardSel");
-      if (sel) sel.textContent = `${b.name} (${b.code})`;
-      try { await loadSparkForBoard(type, b.code, b.name); } catch {}
-      await loadConstituents();
-    });
-    list.appendChild(div);
-  });
-
-  // Auto-render a sparkline for the first board in each list.
-  if (boards.length > 0 && !state.sparkByType?.[type]?.board) {
-    const first = boards[0];
-    if (first && first.code) {
-      const firstEl = list.querySelector(".item");
-      if (firstEl) firstEl.classList.add("active");
-      await loadSparkForBoard(type, first.code, first.name);
-    }
-  }
+  buildBoardGrid(type, boards);
+  await refreshBoardTrends(type, boards);
 }
 
-async function loadConstituents() {
-  if (!state.boardCode) return;
-  const url = `/api/board/constituents?board=${encodeURIComponent(state.boardCode)}&pn=${encodeURIComponent(String(state.boardPN))}&pz=${encodeURIComponent(String(state.boardPZ))}`;
-  const data = await getJSON(url);
-  const rows = data.rows || [];
-  const tbody = document.querySelector("#tblCon tbody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-  rows.forEach(r => {
-    const tr = document.createElement("tr");
-    const td = (t, cls) => { const x=document.createElement("td"); if(cls) x.className=cls; x.textContent=t; return x; };
-    tr.appendChild(td(r.code));
-    tr.appendChild(td(r.name || "-"));
-    tr.appendChild(td(String(r.price ?? "-"), "num"));
-    tr.appendChild(td((r.pct ?? "-") + (Number.isFinite(r.pct) ? "%" : ""), "num"));
-    tr.appendChild(td(String(r.open ?? "-"), "num"));
-    tr.appendChild(td(String(r.high ?? "-"), "num"));
-    tr.appendChild(td(String(r.low ?? "-"), "num"));
-    tbody.appendChild(tr);
+function buildBoardGrid(type, boards) {
+  const gridId = type === "industry" ? "boardGridInd" : "boardGridCon";
+  const grid = document.getElementById(gridId);
+  if (!grid) return;
+  grid.innerHTML = "";
+  const map = new Map();
+  (boards || []).forEach(b => {
+    const code = b.code || b.Code || "";
+    if (!code) return;
+    const card = document.createElement("div");
+    card.className = "boardCard";
+    card.dataset.code = code;
+
+    const title = document.createElement("div");
+    title.className = "boardCardTitle";
+    title.textContent = `${b.name || "-"} ${code}`;
+
+    const meta = document.createElement("div");
+    meta.className = "boardCardMeta";
+    const val = document.createElement("div");
+    val.textContent = fmtMoney(Number(b.value ?? b.Value));
+    const pct = document.createElement("div");
+    const pctNum = Number(b.pct ?? b.Pct);
+    pct.textContent = Number.isFinite(pctNum) ? pctNum.toFixed(2) + "%" : "-";
+    pct.className = Number.isFinite(pctNum) ? (pctNum > 0 ? "up" : (pctNum < 0 ? "down" : "")) : "";
+    meta.appendChild(val);
+    meta.appendChild(pct);
+
+    const canvas = document.createElement("canvas");
+    canvas.className = "boardCardCanvas";
+    canvas.height = 250;
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(canvas);
+    grid.appendChild(card);
+
+    map.set(code, { canvas, title, meta, name: b.name || "-", points: null });
   });
+  state.boardCharts[type] = map;
+}
+
+function renderBoardChartsFromCache(type) {
+  const cache = state.boardCharts[type];
+  if (!cache || cache.size === 0) return;
+  cache.forEach((v) => {
+    if (v.points && v.points.length >= 2) {
+      const labels = v.points.map(p => String(p.ts || p.TS || "").slice(11, 16));
+      const values = v.points.map(p => Number(p.price ?? p.Price));
+      drawLineChart(v.canvas, labels, values);
+    }
+  });
+}
+
+async function fetchBoardTrend(boardCode) {
+  const url = `/api/board/trend?board=${encodeURIComponent(boardCode)}`;
+  return await getJSON(url);
+}
+
+async function refreshBoardTrends(type, boards) {
+  const cache = state.boardCharts[type];
+  if (!cache || cache.size === 0) return;
+  const list = (boards || []).map(b => b.code || b.Code).filter(Boolean);
+  const limit = 4;
+  let idx = 0;
+  const run = async () => {
+    while (idx < list.length) {
+      const code = list[idx++];
+      try {
+        const data = await fetchBoardTrend(code);
+        const points = data?.points || [];
+        const entry = cache.get(code);
+        if (entry && points.length >= 2) {
+          entry.points = points;
+          const labels = points.map(p => String(p.ts || p.TS || "").slice(11, 16));
+          const values = points.map(p => Number(p.price ?? p.Price));
+          drawLineChart(entry.canvas, labels, values);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+  const workers = [];
+  for (let i = 0; i < limit; i++) workers.push(run());
+  await Promise.all(workers);
 }
 
 async function loadHistory() {
@@ -719,7 +624,6 @@ async function loadHistory() {
     state.historyMeta = { source, kind, fid, limit };
     state.historyRows = rows;
     renderHistoryChart(state.historyMeta, state.historyRows);
-
     const head = document.getElementById("histHead");
     const tbody = document.querySelector("#tblHist tbody");
     head.innerHTML = "";
@@ -757,6 +661,33 @@ async function loadHistory() {
   }
 }
 
+function renderIndustryChartHome(rows) {
+  const canvas = document.getElementById("homeIndustryChart");
+  if (!canvas) return;
+  const labels = [];
+  const values = [];
+  (rows || []).forEach(r => {
+    const v = Number(r.value ?? r.Value);
+    if (!Number.isFinite(v)) return;
+    const t = fmtBJTime(r.ts_utc || r.TSUTC || "");
+    labels.push(t === "-" ? "-" : t.slice(5, 16));
+    values.push(v);
+  });
+  drawLineChart(canvas, labels, values);
+}
+
+async function loadIndustryChartHome() {
+  try {
+    const fid = (state.cfg?.market_agg?.fid) || "f62";
+    const url = `/api/history/market_agg?source=industry_sum&fid=${encodeURIComponent(fid)}&kind=rt&limit=200`;
+    const rows = await getJSON(url);
+    state.homeChartRows = rows;
+    renderIndustryChartHome(rows);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 async function bootRoute() {
   clearTimers();
   const route = getRoute();
@@ -770,16 +701,27 @@ async function bootRoute() {
 
   if (route === "home") {
     await refreshRealtimeOnce();
-    state.timers.push(setInterval(refreshRealtimeOnce, 2000));
+    state.timers.push(setInterval(refreshRealtimeOnce, 10000));
     try {
-      setBoardType(state.boardType);
       await Promise.all([
-        loadBoardsFor("industry", "boardListInd", "boardHintInd"),
-        loadBoardsFor("concept", "boardListCon", "boardHintCon"),
+        loadBoardsFor("industry", null, "boardHintInd"),
+        loadBoardsFor("concept", null, "boardHintCon"),
       ]);
     } catch (e) {
       console.error(e);
     }
+    state.timers.push(setInterval(async () => {
+      try {
+        await Promise.all([
+          loadBoardsFor("industry", null, "boardHintInd"),
+          loadBoardsFor("concept", null, "boardHintCon"),
+        ]);
+      } catch (e) {
+        console.error(e);
+      }
+    }, 30000));
+    await loadIndustryChartHome();
+    state.timers.push(setInterval(loadIndustryChartHome, 60000));
     await refreshBuildInfo();
   } else if (route === "history") {
     await loadHistory();

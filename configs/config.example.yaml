@@ -7,7 +7,7 @@ watchlist:
   - 000001.SZ
 
 realtime:
-  interval_seconds: 10
+  interval_seconds: 20
   # If true, only collect during CN trading sessions (Asia/Shanghai).
   only_during_trading_hours: true
 
@@ -22,7 +22,7 @@ cleanup:
   run_at: "03:10"
 
 toplist:
-  size: 20
+  size: 10
   # A-share universe (SH/SZ/BJ; excludes funds/indices).
   fs: "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23"
   # Eastmoney field id; f62 is commonly "today main net inflow".
