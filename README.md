@@ -52,6 +52,10 @@ Or run a web UI with settings (also runs realtime collector in the same process)
 
 ## Notes / Caveats
 
+- Realtime fetch results are stored in memory; a periodic snapshot task writes them to SQLite
+  (see `persist.interval_seconds` in config).
+- SQLite retention: keep the last `retention_days` (default 30). A daily cleanup task runs once per day
+  (see `cleanup.enabled` + `cleanup.run_at`).
 - "主力资金/大单/小单" are platform-derived metrics unless you compute them from Level2 ticks.
   This MVP uses the free Eastmoney fields as-is, suitable for dashboards and relative comparisons.
 - CN holidays are not handled yet; daily runs are "best effort" snapshots.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/config"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/collector"
+	"github.com/pcdogyu/A-Stock-Order-Flow/internal/memstore"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/runtimecfg"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/store/sqlite"
 )
@@ -50,7 +51,11 @@ func main() {
 		fatalIf(sqlite.Migrate(db))
 
 		ctx := context.Background()
-		c := collector.New(runtimecfg.NewStatic(cfg), db)
+		mem := memstore.New()
+		static := runtimecfg.NewStatic(cfg)
+		c := collector.New(static, db, mem)
+		go runCleanupLoop(ctx, static, db)
+		go runPersistLoop(ctx, static, c)
 		fatalIf(c.RunRealtime(ctx))
 	case "daily":
 		fs := flag.NewFlagSet("daily", flag.ExitOnError)
@@ -75,7 +80,7 @@ func main() {
 		}
 
 		ctx := context.Background()
-		c := collector.New(runtimecfg.NewStatic(cfg), db)
+		c := collector.New(runtimecfg.NewStatic(cfg), db, memstore.New())
 		fatalIf(c.RunDaily(ctx, d))
 	case "web":
 		fs := flag.NewFlagSet("web", flag.ExitOnError)
@@ -92,12 +97,15 @@ func main() {
 		fatalIf(sqlite.Migrate(db))
 
 		ctx := context.Background()
-		c := collector.New(mgr, db)
+		mem := memstore.New()
+		c := collector.New(mgr, db, mem)
 		go func() {
 			if err := c.RunRealtime(ctx); err != nil {
 				log.Printf("collector stopped: %v", err)
 			}
 		}()
+		go runCleanupLoop(ctx, mgr, db)
+		go runPersistLoop(ctx, mgr, c)
 
 		srv := newWebServer(mgr)
 		log.Printf("web listening on http://%s", *addr)

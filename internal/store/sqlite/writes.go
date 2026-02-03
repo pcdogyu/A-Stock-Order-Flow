@@ -24,7 +24,7 @@ func UpsertNorthboundRT(db *sql.DB, tsUTC time.Time, nb eastmoney.NorthboundRT) 
 			sz_net_buy_amt=excluded.sz_net_buy_amt,
 			sz_buy_amt=excluded.sz_buy_amt,
 			sz_sell_amt=excluded.sz_sell_amt
-	`, tsUTC.Format(time.RFC3339Nano), nb.TradeDate,
+	`, fixedRFC3339Nano(tsUTC), nb.TradeDate,
 		nb.SH.DayNetAmtIn, nb.SH.NetBuyAmt, nb.SH.BuyAmt, nb.SH.SellAmt,
 		nb.SZ.DayNetAmtIn, nb.SZ.NetBuyAmt, nb.SZ.BuyAmt, nb.SZ.SellAmt)
 	return err
@@ -78,7 +78,7 @@ func UpsertFundflowRT(db *sql.DB, tsUTC time.Time, rows []eastmoney.FundflowRT) 
 	}
 	defer stmt.Close()
 
-	ts := tsUTC.Format(time.RFC3339Nano)
+	ts := fixedRFC3339Nano(tsUTC)
 	for _, r := range rows {
 		if _, err := stmt.Exec(ts, r.Code, r.Name, r.NetMain, r.NetXL, r.NetL, r.NetM, r.NetS); err != nil {
 			return err
@@ -128,7 +128,7 @@ func UpsertTopListRT(db *sql.DB, tsUTC time.Time, fid string, rows []eastmoney.T
 	}
 	defer stmt.Close()
 
-	ts := tsUTC.Format(time.RFC3339Nano)
+	ts := fixedRFC3339Nano(tsUTC)
 	for _, r := range rows {
 		if _, err := stmt.Exec(ts, fid, r.Rank, r.Code, r.Name, r.Price, r.Pct, r.Value); err != nil {
 			return err
@@ -161,7 +161,7 @@ func UpsertBoardRT(db *sql.DB, tsUTC time.Time, boardType, fid string, rows []ea
 	}
 	defer stmt.Close()
 
-	ts := tsUTC.Format(time.RFC3339Nano)
+	ts := fixedRFC3339Nano(tsUTC)
 	for _, r := range rows {
 		if _, err := stmt.Exec(ts, boardType, fid, r.Code, r.Name, r.Price, r.Pct, r.Value); err != nil {
 			return err
@@ -208,7 +208,7 @@ func UpsertMarketAggRT(db *sql.DB, tsUTC time.Time, source, fid string, value fl
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(ts_utc, source, fid) DO UPDATE SET
 			value=excluded.value
-	`, tsUTC.Format(time.RFC3339Nano), source, fid, value)
+	`, fixedRFC3339Nano(tsUTC), source, fid, value)
 	return err
 }
 

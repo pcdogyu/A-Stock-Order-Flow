@@ -9,6 +9,7 @@ import (
 
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/config"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/eastmoney"
+	"github.com/pcdogyu/A-Stock-Order-Flow/internal/memstore"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/market"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/symbol"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/store/sqlite"
@@ -23,19 +24,24 @@ type Collector struct {
 	db  *sql.DB
 	em  *eastmoney.Client
 	loc *time.Location
+	mem *memstore.Store
 
 	lastIndustry time.Time
 	lastConcept  time.Time
 	lastAllStocks time.Time
 }
 
-func New(cfgp ConfigProvider, db *sql.DB) *Collector {
+func New(cfgp ConfigProvider, db *sql.DB, mem *memstore.Store) *Collector {
 	loc, _ := time.LoadLocation("Asia/Shanghai")
+	if mem == nil {
+		mem = memstore.New()
+	}
 	return &Collector{
 		cfgp: cfgp,
 		db:  db,
 		em:  eastmoney.NewClient(),
 		loc: loc,
+		mem: mem,
 	}
 }
 
@@ -79,9 +85,7 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 	if err != nil {
 		return fmt.Errorf("northbound rt: %w", err)
 	}
-	if err := sqlite.UpsertNorthboundRT(c.db, ts, nb); err != nil {
-		return fmt.Errorf("store northbound rt: %w", err)
-	}
+	c.mem.SetNorthbound(ts, nb)
 
 	// 2) Watchlist fundflow (主力/超大/大/中/小)
 	secids, err := symbol.ToEastmoneySecIDs(cfg.Watchlist)
@@ -92,18 +96,14 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 	if err != nil {
 		return fmt.Errorf("fundflow rt: %w", err)
 	}
-	if err := sqlite.UpsertFundflowRT(c.db, ts, ffRows); err != nil {
-		return fmt.Errorf("store fundflow rt: %w", err)
-	}
+	c.mem.SetFundflow(ts, ffRows)
 
 	// 3) Top list by net main inflow (or any Eastmoney fid field)
 	top, err := c.em.TopListDynamic(ctx, cfg.Toplist.FS, cfg.Toplist.FID, cfg.Toplist.Size)
 	if err != nil {
 		return fmt.Errorf("toplist rt: %w", err)
 	}
-	if err := sqlite.UpsertTopListRT(c.db, ts, cfg.Toplist.FID, top); err != nil {
-		return fmt.Errorf("store toplist rt: %w", err)
-	}
+	c.mem.SetToplist(ts, cfg.Toplist.FID, top)
 
 	// 4) Industry / Concept boards + whole-market aggregate (computed from industry sum)
 	if cfg.Industry.Enabled {
@@ -113,16 +113,12 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 			if err != nil {
 				log.Printf("industry boards rt err: %v", err)
 			} else {
-				if err := sqlite.UpsertBoardRT(c.db, ts, "industry", cfg.Industry.FID, items); err != nil {
-					log.Printf("store industry boards rt err: %v", err)
-				}
+				c.mem.SetBoard(ts, "industry", cfg.Industry.FID, items)
 				var sum float64
 				for _, it := range items {
 					sum += it.Value
 				}
-				if err := sqlite.UpsertMarketAggRT(c.db, ts, "industry_sum", cfg.Industry.FID, sum); err != nil {
-					log.Printf("store market agg rt err: %v", err)
-				}
+				c.mem.SetAgg(ts, "industry_sum", cfg.Industry.FID, sum)
 			}
 			c.lastIndustry = now
 		}
@@ -141,9 +137,7 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 			if err != nil {
 				log.Printf("concept boards rt err: %v", err)
 			} else {
-				if err := sqlite.UpsertBoardRT(c.db, ts, "concept", cfg.Concept.FID, items); err != nil {
-					log.Printf("store concept boards rt err: %v", err)
-				}
+				c.mem.SetBoard(ts, "concept", cfg.Concept.FID, items)
 			}
 			c.lastConcept = now
 		}
@@ -158,15 +152,60 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 				log.Printf("allstocks sum rt err: %v", err)
 			} else {
 				_ = total // kept for logging later if needed
-				if err := sqlite.UpsertMarketAggRT(c.db, ts, "allstocks_sum", cfg.MarketAgg.FID, sum); err != nil {
-					log.Printf("store allstocks sum rt err: %v", err)
-				}
+				c.mem.SetAgg(ts, "allstocks_sum", cfg.MarketAgg.FID, sum)
 			}
 			c.lastAllStocks = now
 		}
 	}
 
 	return nil
+}
+
+// PersistRealtimeSnapshot writes an in-memory snapshot to SQLite "rt" tables.
+// Caller controls the interval.
+func (c *Collector) PersistRealtimeSnapshot(tsUTC time.Time) error {
+	snap := c.mem.Snapshot(tsUTC)
+	if snap.Northbound != nil {
+		if err := sqlite.UpsertNorthboundRT(c.db, tsUTC, *snap.Northbound); err != nil {
+			return err
+		}
+	}
+	if err := sqlite.UpsertFundflowRT(c.db, tsUTC, snap.Fundflow); err != nil {
+		return err
+	}
+	for fid, rows := range snap.ToplistByFID {
+		if err := sqlite.UpsertTopListRT(c.db, tsUTC, fid, rows); err != nil {
+			return err
+		}
+	}
+	for key, rows := range snap.BoardsByKey {
+		bt, fid, ok := split2(key)
+		if !ok {
+			continue
+		}
+		if err := sqlite.UpsertBoardRT(c.db, tsUTC, bt, fid, rows); err != nil {
+			return err
+		}
+	}
+	for key, v := range snap.AggByKey {
+		source, fid, ok := split2(key)
+		if !ok {
+			continue
+		}
+		if err := sqlite.UpsertMarketAggRT(c.db, tsUTC, source, fid, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func split2(s string) (a, b string, ok bool) {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' {
+			return s[:i], s[i+1:], true
+		}
+	}
+	return "", "", false
 }
 
 func (c *Collector) RunDaily(ctx context.Context, date time.Time) error {
@@ -254,6 +293,13 @@ func (c *Collector) RunDaily(ctx context.Context, date time.Time) error {
 			log.Printf("allstocks sum daily err: %v", err)
 		} else {
 			_ = sqlite.UpsertMarketAggDaily(c.db, tradeDate, "allstocks_sum", cfg.MarketAgg.FID, sum)
+		}
+	}
+
+	// Daily run is a good place to apply retention as well (for cron/task-scheduler usage).
+	if cfg.RetentionDays > 0 {
+		if err := sqlite.CleanupOldData(c.db, time.Now().UTC(), cfg.RetentionDays); err != nil {
+			log.Printf("cleanup err: %v", err)
 		}
 	}
 

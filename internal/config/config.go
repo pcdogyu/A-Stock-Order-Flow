@@ -9,12 +9,22 @@ import (
 
 type Config struct {
 	DBPath    string   `yaml:"db_path"`
+	RetentionDays int  `yaml:"retention_days"`
 	Watchlist []string `yaml:"watchlist"`
 
 	Realtime struct {
 		IntervalSeconds int   `yaml:"interval_seconds"`
 		OnlyDuringHours *bool `yaml:"only_during_trading_hours"`
 	} `yaml:"realtime"`
+
+	Persist struct {
+		IntervalSeconds int `yaml:"interval_seconds"`
+	} `yaml:"persist"`
+
+	Cleanup struct {
+		Enabled *bool  `yaml:"enabled"`
+		RunAt   string `yaml:"run_at"` // "HH:MM" in Asia/Shanghai
+	} `yaml:"cleanup"`
 
 	Toplist struct {
 		Size int    `yaml:"size"`
@@ -73,6 +83,19 @@ func applyDefaults(cfg *Config) {
 		v := true
 		cfg.Realtime.OnlyDuringHours = &v
 	}
+	if cfg.Persist.IntervalSeconds == 0 {
+		cfg.Persist.IntervalSeconds = 60
+	}
+	if cfg.RetentionDays == 0 {
+		cfg.RetentionDays = 30
+	}
+	if cfg.Cleanup.RunAt == "" {
+		cfg.Cleanup.RunAt = "03:10"
+	}
+	if cfg.Cleanup.Enabled == nil {
+		v := true
+		cfg.Cleanup.Enabled = &v
+	}
 }
 
 // NormalizeAndValidate applies defaults and checks invariants.
@@ -83,6 +106,12 @@ func NormalizeAndValidate(cfg *Config) error {
 	}
 	if cfg.Realtime.IntervalSeconds <= 0 {
 		return fmt.Errorf("realtime.interval_seconds must be > 0")
+	}
+	if cfg.Persist.IntervalSeconds <= 0 {
+		return fmt.Errorf("persist.interval_seconds must be > 0")
+	}
+	if cfg.RetentionDays < 1 {
+		return fmt.Errorf("retention_days must be >= 1")
 	}
 	if cfg.Toplist.Size <= 0 {
 		cfg.Toplist.Size = 20
