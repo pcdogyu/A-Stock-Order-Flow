@@ -321,6 +321,94 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		writeJSON(w, http.StatusOK, map[string]any{"total": total, "rows": rows, "ts_utc": time.Now().UTC()})
 	})
 
+	// Board daily history (fundflow):
+	// GET /api/board/daily?board=BK0457&type=industry&fid=f62&limit=90&refresh=1
+	mux.HandleFunc("/api/board/daily", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		board := strings.TrimSpace(r.URL.Query().Get("board"))
+		if board == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "board is required (e.g. BK0457)"})
+			return
+		}
+		tp := r.URL.Query().Get("type")
+		if tp == "" {
+			tp = "industry"
+		}
+		if tp != "industry" && tp != "concept" {
+			tp = "industry"
+		}
+		fid := r.URL.Query().Get("fid")
+		limit := parseLimit(r.URL.Query().Get("limit"), 120, 2000)
+		refresh := r.URL.Query().Get("refresh")
+
+		cfg := mgr.Get()
+		var bcfg config.BoardConfig
+		if tp == "concept" {
+			bcfg = cfg.Concept
+		} else {
+			bcfg = cfg.Industry
+		}
+		if fid == "" {
+			if bcfg.FID != "" {
+				fid = bcfg.FID
+			} else {
+				fid = "f62"
+			}
+		}
+
+		points, name, err := sqlite.QueryBoardDailyByCode(db, tp, fid, board, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		needFetch := len(points) < limit || refresh == "1" || refresh == "true"
+		var fetchErr error
+		if needFetch {
+			rows, err := em.BoardFundflowDailySeries(r.Context(), board, limit)
+			if err != nil {
+				fetchErr = err
+			} else if len(rows) > 0 {
+				series := make([]sqlite.BoardDailySeriesPoint, 0, len(rows))
+				for _, row := range rows {
+					code := row.Code
+					if code == "" {
+						code = board
+					}
+					series = append(series, sqlite.BoardDailySeriesPoint{
+						TradeDate: row.TradeDate,
+						Code:      code,
+						Name:      row.Name,
+						Value:     row.NetMain,
+						Price:     0,
+						Pct:       0,
+					})
+					if name == "" && row.Name != "" {
+						name = row.Name
+					}
+				}
+				if err := sqlite.UpsertBoardDailySeries(db, tp, fid, series); err != nil {
+					fetchErr = err
+				}
+			}
+			points, name, _ = sqlite.QueryBoardDailyByCode(db, tp, fid, board, limit)
+		}
+
+		out := map[string]any{
+			"board":  board,
+			"name":   name,
+			"points": points,
+			"fid":    fid,
+			"type":   tp,
+		}
+		if fetchErr != nil {
+			out["error"] = fetchErr.Error()
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
 	// Board intraday trend (today):
 	// GET /api/board/trend?board=BK0457
 	mux.HandleFunc("/api/board/trend", func(w http.ResponseWriter, r *http.Request) {

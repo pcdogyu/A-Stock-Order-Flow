@@ -170,6 +170,10 @@ function colorVar(name, fallback) {
   return (v && v.trim()) ? v.trim() : fallback;
 }
 
+function isLightTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light";
+}
+
 function drawLineChart(canvas, labels, values) {
   if (!canvas) return;
 
@@ -183,13 +187,13 @@ function drawLineChart(canvas, labels, values) {
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const bg = colorVar("--bg0", "#0b0e14");
+  const bg = isLightTheme() ? "#ffffff" : "#0b1018";
   const stroke = colorVar("--stroke", "#223042");
   const muted = colorVar("--muted", "#a8b4c6");
   const accent = colorVar("--accent", "#46d6a3");
 
   ctx.clearRect(0, 0, parentW, parentH);
-  ctx.fillStyle = "#0b1018";
+  ctx.fillStyle = isLightTheme() ? "#ffffff" : "#0b1018";
   ctx.fillRect(0, 0, parentW, parentH);
   ctx.strokeStyle = stroke;
   ctx.lineWidth = 1;
@@ -402,7 +406,7 @@ function setRoute(route) {
 
 function getRoute() {
   const h = (location.hash || "#/home").replace(/^#\//, "");
-  if (h === "history" || h === "settings" || h === "home" || h === "industry" || h === "concept") return h;
+  if (h === "history" || h === "history-industry" || h === "history-concept" || h === "settings" || h === "home" || h === "industry" || h === "concept") return h;
   return "home";
 }
 
@@ -421,6 +425,18 @@ let state = {
     concept: [],
   },
   boardTrendRunId: {
+    industry: 0,
+    concept: 0,
+  },
+  boardDailyCharts: {
+    industry: new Map(),
+    concept: new Map(),
+  },
+  boardDailyList: {
+    industry: [],
+    concept: [],
+  },
+  boardDailyRunId: {
     industry: 0,
     concept: 0,
   },
@@ -482,6 +498,12 @@ function wire() {
     if (route === "home") {
       renderBoardChartsFromCache("industry");
       renderBoardChartsFromCache("concept");
+    }
+    if (route === "history-industry") {
+      renderBoardDailyFromCache("industry");
+    }
+    if (route === "history-concept") {
+      renderBoardDailyFromCache("concept");
     }
   });
 
@@ -608,6 +630,15 @@ function wire() {
     const limit = document.getElementById("histLimit");
     if (limit) limit.value = String(v);
   });
+
+  document.getElementById("formHistInd")?.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    await loadBoardDailyView("industry");
+  });
+  document.getElementById("formHistCon")?.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    await loadBoardDailyView("concept");
+  });
 }
 
 async function refreshRealtimeOnce() {
@@ -713,6 +744,130 @@ function renderBoardChartsFromCache(type) {
       drawLineChart(v.canvas, labels, values);
     }
   });
+}
+
+function buildBoardDailyGrid(type, boards) {
+  const gridId = type === "industry" ? "boardGridHistInd" : "boardGridHistCon";
+  const grid = document.getElementById(gridId);
+  if (!grid) return;
+  grid.innerHTML = "";
+  const map = new Map();
+  (boards || []).forEach(b => {
+    const code = b.code || b.Code || "";
+    if (!code) return;
+    const card = document.createElement("div");
+    card.className = "boardCard";
+    card.dataset.code = code;
+
+    const title = document.createElement("div");
+    title.className = "boardCardTitle";
+    title.textContent = `${b.name || "-"} ${code}`;
+
+    const meta = document.createElement("div");
+    meta.className = "boardCardMeta";
+    const val = document.createElement("div");
+    val.textContent = "-";
+    const date = document.createElement("div");
+    date.textContent = "-";
+    meta.appendChild(val);
+    meta.appendChild(date);
+
+    const canvas = document.createElement("canvas");
+    canvas.className = "boardCardCanvas";
+    canvas.height = 250;
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(canvas);
+    grid.appendChild(card);
+
+    map.set(code, { canvas, title, meta, name: b.name || "-", points: null, valEl: val, dateEl: date });
+  });
+  state.boardDailyCharts[type] = map;
+}
+
+function renderBoardDailyFromCache(type) {
+  const cache = state.boardDailyCharts[type];
+  if (!cache || cache.size === 0) return;
+  cache.forEach((v) => {
+    if (v.points && v.points.length >= 2) {
+      const labels = v.points.map(p => String(p.trade_date || p.TradeDate || "").slice(5));
+      const values = v.points.map(p => Number(p.value ?? p.Value));
+      drawLineChart(v.canvas, labels, values);
+    }
+  });
+}
+
+async function fetchBoardDaily(boardCode, type, fid, limit, refresh) {
+  const url = `/api/board/daily?board=${encodeURIComponent(boardCode)}&type=${encodeURIComponent(type)}&fid=${encodeURIComponent(fid)}&limit=${encodeURIComponent(String(limit))}` + (refresh ? "&refresh=1" : "");
+  return await getJSON(url);
+}
+
+async function refreshBoardDaily(type, boards, limit, refresh, onlyMissing = false) {
+  const cache = state.boardDailyCharts[type];
+  if (!cache || cache.size === 0) return;
+  let list = (boards || []).map(b => b.code || b.Code).filter(Boolean);
+  if (onlyMissing) {
+    list = list.filter(code => {
+      const entry = cache.get(code);
+      return !(entry && entry.points && entry.points.length >= 2);
+    });
+  }
+  if (list.length === 0) return;
+  const runId = ++state.boardDailyRunId[type];
+  const batchSize = state.boardTrendCfg.batchSize;
+  const concurrency = Math.max(1, Math.min(6, state.boardTrendCfg.concurrency || 2));
+  let offset = 0;
+  while (offset < list.length) {
+    if (state.boardDailyRunId[type] !== runId) return;
+    const batch = list.slice(offset, offset + batchSize);
+    offset += batchSize;
+    let idx = 0;
+    const run = async () => {
+      while (idx < batch.length) {
+        const code = batch[idx++];
+        try {
+          const data = await fetchBoardDaily(code, type, (state.cfg?.[type]?.fid) || "f62", limit, refresh);
+          const points = data?.points || [];
+          const entry = cache.get(code);
+          if (entry && points.length >= 2) {
+            entry.points = points;
+            const labels = points.map(p => String(p.trade_date || p.TradeDate || "").slice(5));
+            const values = points.map(p => Number(p.value ?? p.Value));
+            drawLineChart(entry.canvas, labels, values);
+            const last = points[points.length - 1];
+            if (entry.valEl) entry.valEl.textContent = fmtMoney(Number(last.value ?? last.Value));
+            if (entry.dateEl) entry.dateEl.textContent = String(last.trade_date || last.TradeDate || "-");
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+    const workers = [];
+    for (let i = 0; i < concurrency; i++) workers.push(run());
+    await Promise.all(workers);
+    if (offset < list.length) {
+      await new Promise(r => setTimeout(r, state.boardTrendCfg.gapMs));
+    }
+  }
+}
+
+async function loadBoardDailyView(type) {
+  const limitId = type === "industry" ? "histIndLimit" : "histConLimit";
+  const boardsId = type === "industry" ? "histIndBoards" : "histConBoards";
+  const refreshId = type === "industry" ? "histIndRefresh" : "histConRefresh";
+  const limit = Number(document.getElementById(limitId)?.value || "120");
+  const boardLimit = Number(document.getElementById(boardsId)?.value || "80");
+  const refresh = document.getElementById(refreshId)?.checked;
+  const fid = (state.cfg?.[type]?.fid) || "f62";
+
+  const url = `/api/boards?type=${encodeURIComponent(type)}&fid=${encodeURIComponent(fid)}&limit=${encodeURIComponent(String(boardLimit))}`;
+  const data = await getJSON(url);
+  const boards = Array.isArray(data) ? data : (data.rows || []);
+  state.boardDailyList[type] = boards;
+  buildBoardDailyGrid(type, boards);
+  await refreshBoardDaily(type, boards, limit, refresh, false);
 }
 
 async function fetchBoardTrend(boardCode) {
@@ -989,6 +1144,18 @@ async function bootRoute() {
     } else {
       state.marketClosed = true;
       startMissingTrendRefresh();
+    }
+  } else if (route === "history-industry") {
+    try {
+      await loadBoardDailyView("industry");
+    } catch (e) {
+      console.error(e);
+    }
+  } else if (route === "history-concept") {
+    try {
+      await loadBoardDailyView("concept");
+    } catch (e) {
+      console.error(e);
     }
   } else if (route === "history") {
     await loadHistory();
