@@ -23,6 +23,10 @@ type Patch struct {
 	MarketAggEnabled         *bool `json:"market_agg_enabled,omitempty"`
 	MarketAggIntervalSeconds *int  `json:"market_agg_interval_seconds,omitempty"`
 	MarketAggConcurrency     *int  `json:"market_agg_concurrency,omitempty"`
+
+	BoardTrendBatchSize   *int `json:"board_trend_batch_size,omitempty"`
+	BoardTrendConcurrency *int `json:"board_trend_concurrency,omitempty"`
+	BoardTrendGapMS       *int `json:"board_trend_gap_ms,omitempty"`
 }
 
 func (p Patch) Apply(cfg *config.Config) {
@@ -68,5 +72,14 @@ func (p Patch) Apply(cfg *config.Config) {
 	if p.MarketAggConcurrency != nil {
 		cfg.MarketAgg.Concurrency = *p.MarketAggConcurrency
 	}
-}
 
+	if p.BoardTrendBatchSize != nil {
+		cfg.BoardTrend.BatchSize = *p.BoardTrendBatchSize
+	}
+	if p.BoardTrendConcurrency != nil {
+		cfg.BoardTrend.Concurrency = *p.BoardTrendConcurrency
+	}
+	if p.BoardTrendGapMS != nil {
+		cfg.BoardTrend.GapMS = *p.BoardTrendGapMS
+	}
+}

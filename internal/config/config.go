@@ -8,9 +8,9 @@ import (
 )
 
 type Config struct {
-	DBPath    string   `yaml:"db_path"`
-	RetentionDays int  `yaml:"retention_days"`
-	Watchlist []string `yaml:"watchlist"`
+	DBPath        string   `yaml:"db_path"`
+	RetentionDays int      `yaml:"retention_days"`
+	Watchlist     []string `yaml:"watchlist"`
 
 	Realtime struct {
 		IntervalSeconds int   `yaml:"interval_seconds"`
@@ -36,6 +36,8 @@ type Config struct {
 	Concept  BoardConfig `yaml:"concept"`
 
 	MarketAgg MarketAggConfig `yaml:"market_agg"`
+
+	BoardTrend BoardTrendConfig `yaml:"board_trend"`
 }
 
 type BoardConfig struct {
@@ -54,7 +56,13 @@ type MarketAggConfig struct {
 	IntervalSeconds int    `yaml:"interval_seconds" json:"interval_seconds"`
 	FS              string `yaml:"fs" json:"fs"`
 	FID             string `yaml:"fid" json:"fid"`
-	Concurrency      int   `yaml:"concurrency" json:"concurrency"`
+	Concurrency     int    `yaml:"concurrency" json:"concurrency"`
+}
+
+type BoardTrendConfig struct {
+	BatchSize   int `yaml:"batch_size" json:"batch_size"`
+	Concurrency int `yaml:"concurrency" json:"concurrency"`
+	GapMS       int `yaml:"gap_ms" json:"gap_ms"`
 }
 
 func Load(path string) (Config, error) {
@@ -125,6 +133,7 @@ func NormalizeAndValidate(cfg *Config) error {
 	applyBoardDefaults(&cfg.Industry, true, "m:90+t:2")
 	applyBoardDefaults(&cfg.Concept, true, "m:90+t:3")
 	applyMarketAggDefaults(&cfg.MarketAgg)
+	applyBoardTrendDefaults(&cfg.BoardTrend)
 	return nil
 }
 
@@ -175,5 +184,35 @@ func applyMarketAggDefaults(m *MarketAggConfig) {
 	}
 	if m.Concurrency > 10 {
 		m.Concurrency = 10
+	}
+}
+
+func applyBoardTrendDefaults(b *BoardTrendConfig) {
+	if b.BatchSize == 0 {
+		b.BatchSize = 20
+	}
+	if b.Concurrency == 0 {
+		b.Concurrency = 2
+	}
+	if b.GapMS == 0 {
+		b.GapMS = 400
+	}
+	if b.BatchSize < 5 {
+		b.BatchSize = 5
+	}
+	if b.BatchSize > 100 {
+		b.BatchSize = 100
+	}
+	if b.Concurrency < 1 {
+		b.Concurrency = 1
+	}
+	if b.Concurrency > 6 {
+		b.Concurrency = 6
+	}
+	if b.GapMS < 100 {
+		b.GapMS = 100
+	}
+	if b.GapMS > 5000 {
+		b.GapMS = 5000
 	}
 }

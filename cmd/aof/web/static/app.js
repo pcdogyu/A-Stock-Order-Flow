@@ -67,7 +67,20 @@ function fillConfig(cfg) {
   document.getElementById("aggInterval").value = cfg.market_agg?.interval_seconds ?? 120;
   document.getElementById("aggConc").value = cfg.market_agg?.concurrency ?? 4;
 
+  if (cfg.board_trend) {
+    state.boardTrendCfg.batchSize = cfg.board_trend.batch_size ?? state.boardTrendCfg.batchSize;
+    state.boardTrendCfg.concurrency = cfg.board_trend.concurrency ?? state.boardTrendCfg.concurrency;
+    state.boardTrendCfg.gapMs = cfg.board_trend.gap_ms ?? state.boardTrendCfg.gapMs;
+    fillTrendCfgForm();
+  }
+
   document.getElementById("watchlist").value = (cfg.watchlist || []).join("\n");
+}
+
+function fillTrendCfgForm() {
+  document.getElementById("trendBatch").value = String(state.boardTrendCfg.batchSize);
+  document.getElementById("trendConc").value = String(state.boardTrendCfg.concurrency);
+  document.getElementById("trendGap").value = String(state.boardTrendCfg.gapMs);
 }
 
 function fmtMoney(v) {
@@ -104,6 +117,29 @@ function fmtBJTime(isoLike) {
   const m = {};
   parts.forEach(p => { if (p.type !== "literal") m[p.type] = p.value; });
   return `${m.year}-${m.month}-${m.day} ${m.hour}:${m.minute}:${m.second}`;
+}
+
+function getBJTimeParts() {
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const m = {};
+  parts.forEach(p => { if (p.type !== "literal") m[p.type] = p.value; });
+  return m;
+}
+
+function isAfterCloseBJ() {
+  const t = getBJTimeParts();
+  const h = Number(t.hour || 0);
+  const m = Number(t.minute || 0);
+  return h > 15 || (h === 15 && m >= 0);
 }
 
 function colorVar(name, fallback) {
@@ -237,17 +273,18 @@ function renderHistoryChart(meta, rows) {
   const canvas = document.getElementById("histChart");
   if (!panel || !canvas) return;
   const kind = meta?.kind || "daily";
-  if (kind !== "daily") {
-    panel.hidden = true;
-    return;
-  }
   panel.hidden = false;
   const labels = [];
   const values = [];
-  (rows || []).slice(-90).forEach(r => {
+  (rows || []).forEach(r => {
     const v = Number(r.value ?? r.Value);
     if (!Number.isFinite(v)) return;
-    labels.push(r.trade_date || r.TradeDate || "-");
+    if (kind === "rt") {
+      const t = fmtBJTime(r.ts_utc || r.TSUTC || "");
+      labels.push(t === "-" ? "-" : t.slice(5, 16));
+    } else {
+      labels.push(r.trade_date || r.TradeDate || "-");
+    }
     values.push(v);
   });
   drawLineChart(canvas, labels, values);
@@ -356,6 +393,16 @@ let state = {
     industry: new Map(),
     concept: new Map(),
   },
+  boardTrendRunId: {
+    industry: 0,
+    concept: 0,
+  },
+  boardTrendCfg: {
+    batchSize: 20,
+    concurrency: 2,
+    gapMs: 400,
+  },
+  marketClosed: false,
 };
 
 function clearTimers() {
@@ -390,6 +437,7 @@ async function refreshBuildInfo() {
 
 function wire() {
   initThemeToggle();
+  fillTrendCfgForm();
   window.addEventListener("hashchange", () => bootRoute());
   window.addEventListener("resize", () => {
     const route = getRoute();
@@ -489,9 +537,41 @@ function wire() {
     }
   });
 
+  document.getElementById("formBoardTrend").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const batchSize = Number(document.getElementById("trendBatch").value);
+    const concurrency = Number(document.getElementById("trendConc").value);
+    const gapMs = Number(document.getElementById("trendGap").value);
+    state.boardTrendCfg.batchSize = Math.min(100, Math.max(5, Number.isFinite(batchSize) ? batchSize : 20));
+    state.boardTrendCfg.concurrency = Math.min(6, Math.max(1, Number.isFinite(concurrency) ? concurrency : 2));
+    state.boardTrendCfg.gapMs = Math.min(5000, Math.max(100, Number.isFinite(gapMs) ? gapMs : 400));
+    fillTrendCfgForm();
+    try {
+      setPill(true, "saving...");
+      const payload = {
+        board_trend_batch_size: state.boardTrendCfg.batchSize,
+        board_trend_concurrency: state.boardTrendCfg.concurrency,
+        board_trend_gap_ms: state.boardTrendCfg.gapMs,
+      };
+      const cfg = await postJSON("/api/config", payload);
+      state.cfg = cfg;
+      fillConfig(cfg);
+      setPill(true, "saved");
+      setTimeout(() => setPill(true, "connected"), 700);
+    } catch (e) {
+      console.error(e);
+      setPill(false, "save failed");
+    }
+  });
+
   document.getElementById("formHistory").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     await loadHistory();
+  });
+  document.getElementById("histPeriod")?.addEventListener("change", () => {
+    const v = Number(document.getElementById("histPeriod").value || "90");
+    const limit = document.getElementById("histLimit");
+    if (limit) limit.value = String(v);
   });
 }
 
@@ -500,6 +580,11 @@ async function refreshRealtimeOnce() {
     const snap = await getJSON("/api/realtime");
     if (state.cfg) fillRealtime(snap, state.cfg);
     setPill(true, "connected");
+    if (!state.marketClosed && isAfterCloseBJ()) {
+      state.marketClosed = true;
+      clearTimers();
+      setPill(true, "market closed");
+    }
   } catch (e) {
     console.error(e);
     setPill(false, "rt error");
@@ -520,7 +605,7 @@ async function loadBoardsFor(type, _listId, hintId) {
     }
   }
   buildBoardGrid(type, boards);
-  await refreshBoardTrends(type, boards);
+  refreshBoardTrends(type, boards);
 }
 
 function buildBoardGrid(type, boards) {
@@ -586,29 +671,40 @@ async function refreshBoardTrends(type, boards) {
   const cache = state.boardCharts[type];
   if (!cache || cache.size === 0) return;
   const list = (boards || []).map(b => b.code || b.Code).filter(Boolean);
-  const limit = 4;
-  let idx = 0;
-  const run = async () => {
-    while (idx < list.length) {
-      const code = list[idx++];
-      try {
-        const data = await fetchBoardTrend(code);
-        const points = data?.points || [];
-        const entry = cache.get(code);
-        if (entry && points.length >= 2) {
-          entry.points = points;
-          const labels = points.map(p => String(p.ts || p.TS || "").slice(11, 16));
-          const values = points.map(p => Number(p.price ?? p.Price));
-          drawLineChart(entry.canvas, labels, values);
+  const runId = ++state.boardTrendRunId[type];
+  const batchSize = state.boardTrendCfg.batchSize;
+  const concurrency = state.boardTrendCfg.concurrency;
+  let offset = 0;
+  while (offset < list.length) {
+    if (state.boardTrendRunId[type] !== runId) return;
+    const batch = list.slice(offset, offset + batchSize);
+    offset += batchSize;
+    let idx = 0;
+    const run = async () => {
+      while (idx < batch.length) {
+        const code = batch[idx++];
+        try {
+          const data = await fetchBoardTrend(code);
+          const points = data?.points || [];
+          const entry = cache.get(code);
+          if (entry && points.length >= 2) {
+            entry.points = points;
+            const labels = points.map(p => String(p.ts || p.TS || "").slice(11, 16));
+            const values = points.map(p => Number(p.price ?? p.Price));
+            drawLineChart(entry.canvas, labels, values);
+          }
+        } catch (e) {
+          console.error(e);
         }
-      } catch (e) {
-        console.error(e);
       }
+    };
+    const workers = [];
+    for (let i = 0; i < concurrency; i++) workers.push(run());
+    await Promise.all(workers);
+    if (offset < list.length) {
+      await new Promise(r => setTimeout(r, state.boardTrendCfg.gapMs));
     }
-  };
-  const workers = [];
-  for (let i = 0; i < limit; i++) workers.push(run());
-  await Promise.all(workers);
+  }
 }
 
 async function loadHistory() {
@@ -619,9 +715,18 @@ async function loadHistory() {
     const limit = Number(document.getElementById("histLimit").value || "200");
     const fid = (state.cfg?.market_agg?.fid) || "f62";
 
-    const url = `/api/history/market_agg?source=${encodeURIComponent(source)}&fid=${encodeURIComponent(fid)}&kind=${encodeURIComponent(kind)}&limit=${encodeURIComponent(String(limit))}`;
-    const rows = await getJSON(url);
-    state.historyMeta = { source, kind, fid, limit };
+    let rows;
+    if (source.startsWith("board_")) {
+      const tp = source === "board_concept_sum" ? "concept" : "industry";
+      const url = `/api/history/board_sum?type=${encodeURIComponent(tp)}&fid=${encodeURIComponent(fid)}&kind=${encodeURIComponent(kind)}&limit=${encodeURIComponent(String(limit))}`;
+      rows = await getJSON(url);
+      state.historyMeta = { source, kind, fid, limit, boardType: tp };
+    } else {
+      const src = source === "market_allstocks_sum" ? "allstocks_sum" : "industry_sum";
+      const url = `/api/history/market_agg?source=${encodeURIComponent(src)}&fid=${encodeURIComponent(fid)}&kind=${encodeURIComponent(kind)}&limit=${encodeURIComponent(String(limit))}`;
+      rows = await getJSON(url);
+      state.historyMeta = { source, kind, fid, limit, marketSource: src };
+    }
     state.historyRows = rows;
     renderHistoryChart(state.historyMeta, state.historyRows);
     const head = document.getElementById("histHead");
@@ -652,6 +757,11 @@ async function loadHistory() {
         tr.appendChild(td1); tr.appendChild(td2);
         tbody.appendChild(tr);
       });
+    }
+    const title = document.getElementById("histChartTitle");
+    if (title) {
+      const unit = kind === "rt" ? "条" : "天";
+      title.textContent = `近 ${limit} ${unit}（折线）`;
     }
     setPill(true, "loaded");
     setTimeout(() => setPill(true, "connected"), 700);
@@ -701,7 +811,9 @@ async function bootRoute() {
 
   if (route === "home") {
     await refreshRealtimeOnce();
-    state.timers.push(setInterval(refreshRealtimeOnce, 10000));
+    if (!isAfterCloseBJ()) {
+      state.timers.push(setInterval(refreshRealtimeOnce, 10000));
+    }
     try {
       await Promise.all([
         loadBoardsFor("industry", null, "boardHintInd"),
@@ -710,18 +822,22 @@ async function bootRoute() {
     } catch (e) {
       console.error(e);
     }
-    state.timers.push(setInterval(async () => {
-      try {
-        await Promise.all([
-          loadBoardsFor("industry", null, "boardHintInd"),
-          loadBoardsFor("concept", null, "boardHintCon"),
-        ]);
-      } catch (e) {
-        console.error(e);
-      }
-    }, 30000));
+    if (!isAfterCloseBJ()) {
+      state.timers.push(setInterval(async () => {
+        try {
+          await Promise.all([
+            loadBoardsFor("industry", null, "boardHintInd"),
+            loadBoardsFor("concept", null, "boardHintCon"),
+          ]);
+        } catch (e) {
+          console.error(e);
+        }
+      }, 30000));
+    }
     await loadIndustryChartHome();
-    state.timers.push(setInterval(loadIndustryChartHome, 60000));
+    if (!isAfterCloseBJ()) {
+      state.timers.push(setInterval(loadIndustryChartHome, 60000));
+    }
     await refreshBuildInfo();
   } else if (route === "history") {
     await loadHistory();

@@ -146,6 +146,44 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		writeJSON(w, http.StatusOK, rows)
 	})
 
+	mux.HandleFunc("/api/history/board_sum", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		kind := r.URL.Query().Get("kind")
+		if kind == "" {
+			kind = "daily"
+		}
+		tp := r.URL.Query().Get("type")
+		if tp == "" {
+			tp = "industry"
+		}
+		if tp != "industry" && tp != "concept" {
+			tp = "industry"
+		}
+		fid := r.URL.Query().Get("fid")
+		if fid == "" {
+			fid = "f62"
+		}
+		limit := parseLimit(r.URL.Query().Get("limit"), 200, 2000)
+		if kind == "rt" {
+			rows, err := sqlite.QueryBoardSumRT(db, tp, fid, limit)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, rows)
+			return
+		}
+		rows, err := sqlite.QueryBoardSumDaily(db, tp, fid, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
 	// Board list from in-memory snapshot:
 	// GET /api/boards?type=industry|concept&fid=f62&limit=50
 	mux.HandleFunc("/api/boards", func(w http.ResponseWriter, r *http.Request) {
@@ -539,9 +577,10 @@ type configView struct {
 		FID  string `json:"fid"`
 	} `json:"toplist"`
 
-	Industry  config.BoardConfig     `json:"industry"`
-	Concept   config.BoardConfig     `json:"concept"`
-	MarketAgg config.MarketAggConfig `json:"market_agg"`
+	Industry   config.BoardConfig      `json:"industry"`
+	Concept    config.BoardConfig      `json:"concept"`
+	MarketAgg  config.MarketAggConfig  `json:"market_agg"`
+	BoardTrend config.BoardTrendConfig `json:"board_trend"`
 }
 
 func toConfigView(cfg config.Config) configView {
@@ -560,6 +599,7 @@ func toConfigView(cfg config.Config) configView {
 	v.Industry = cfg.Industry
 	v.Concept = cfg.Concept
 	v.MarketAgg = cfg.MarketAgg
+	v.BoardTrend = cfg.BoardTrend
 	return v
 }
 
