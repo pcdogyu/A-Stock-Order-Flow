@@ -189,14 +189,6 @@ async function refreshConfig() {
 function wire() {
   window.addEventListener("hashchange", () => bootRoute());
 
-  document.getElementById("btnInd")?.addEventListener("click", async () => {
-    setBoardType("industry");
-    try { await loadBoards(); } catch (e) { console.error(e); }
-  });
-  document.getElementById("btnCon")?.addEventListener("click", async () => {
-    setBoardType("concept");
-    try { await loadBoards(); } catch (e) { console.error(e); }
-  });
   document.getElementById("btnPrev")?.addEventListener("click", async () => {
     if (!state.boardCode) return;
     if (state.boardPN > 1) state.boardPN--;
@@ -308,20 +300,18 @@ function setBoardType(tp) {
   state.boardType = tp;
   state.boardCode = null;
   state.boardPN = 1;
-  document.getElementById("btnInd")?.classList.toggle("active", tp === "industry");
-  document.getElementById("btnCon")?.classList.toggle("active", tp === "concept");
   const sel = document.getElementById("boardSel");
   if (sel) sel.textContent = "未选择";
   const tbody = document.querySelector("#tblCon tbody");
   if (tbody) tbody.innerHTML = "";
 }
 
-async function loadBoards() {
-  const fid = (state.boardType === "concept" ? state.cfg?.concept?.fid : state.cfg?.industry?.fid) || "f62";
-  const url = `/api/boards?type=${encodeURIComponent(state.boardType)}&fid=${encodeURIComponent(fid)}&limit=50`;
+async function loadBoardsFor(type, listId, hintId) {
+  const fid = (type === "concept" ? state.cfg?.concept?.fid : state.cfg?.industry?.fid) || "f62";
+  const url = `/api/boards?type=${encodeURIComponent(type)}&fid=${encodeURIComponent(fid)}&limit=50`;
   const data = await getJSON(url);
   const boards = Array.isArray(data) ? data : (data.rows || []);
-  const boardHint = document.getElementById("boardHint");
+  const boardHint = document.getElementById(hintId);
   if (boardHint) {
     const show = !Array.isArray(data) && !!data.from_live;
     boardHint.hidden = !show;
@@ -329,7 +319,7 @@ async function loadBoards() {
       boardHint.textContent = "市场休市或未抓到快照，已即时拉取板块数据。";
     }
   }
-  const list = document.getElementById("boardList");
+  const list = document.getElementById(listId);
   if (!list) return;
   list.innerHTML = "";
   boards.forEach(b => {
@@ -338,8 +328,9 @@ async function loadBoards() {
     div.dataset.code = b.code;
     div.innerHTML = `<div class="name">${b.name} <span class="code">${b.code}</span></div><div class="val">${fmtMoney(b.value)}</div>`;
     div.addEventListener("click", async () => {
-      document.querySelectorAll("#boardList .item").forEach(x => x.classList.remove("active"));
+      document.querySelectorAll(".boardPanel .item").forEach(x => x.classList.remove("active"));
       div.classList.add("active");
+      state.boardType = type;
       state.boardCode = b.code;
       state.boardPN = 1;
       const sel = document.getElementById("boardSel");
@@ -436,7 +427,10 @@ async function bootRoute() {
     state.timers.push(setInterval(refreshRealtimeOnce, 2000));
     try {
       setBoardType(state.boardType);
-      await loadBoards();
+      await Promise.all([
+        loadBoardsFor("industry", "boardListInd", "boardHintInd"),
+        loadBoardsFor("concept", "boardListCon", "boardHintCon"),
+      ]);
     } catch (e) {
       console.error(e);
     }
