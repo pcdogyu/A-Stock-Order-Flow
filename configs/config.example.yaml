@@ -57,3 +57,5 @@ board_trend:
   batch_size: 20
   concurrency: 2
   gap_ms: 400
+  after_close_mode: once
+  after_close_interval_seconds: 300

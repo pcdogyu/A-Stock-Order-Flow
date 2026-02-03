@@ -60,9 +60,11 @@ type MarketAggConfig struct {
 }
 
 type BoardTrendConfig struct {
-	BatchSize   int `yaml:"batch_size" json:"batch_size"`
-	Concurrency int `yaml:"concurrency" json:"concurrency"`
-	GapMS       int `yaml:"gap_ms" json:"gap_ms"`
+	BatchSize                 int    `yaml:"batch_size" json:"batch_size"`
+	Concurrency               int    `yaml:"concurrency" json:"concurrency"`
+	GapMS                     int    `yaml:"gap_ms" json:"gap_ms"`
+	AfterCloseMode            string `yaml:"after_close_mode" json:"after_close_mode"`
+	AfterCloseIntervalSeconds int    `yaml:"after_close_interval_seconds" json:"after_close_interval_seconds"`
 }
 
 func Load(path string) (Config, error) {
@@ -197,6 +199,12 @@ func applyBoardTrendDefaults(b *BoardTrendConfig) {
 	if b.GapMS == 0 {
 		b.GapMS = 400
 	}
+	if b.AfterCloseMode == "" {
+		b.AfterCloseMode = "once"
+	}
+	if b.AfterCloseIntervalSeconds == 0 {
+		b.AfterCloseIntervalSeconds = 300
+	}
 	if b.BatchSize < 5 {
 		b.BatchSize = 5
 	}
@@ -214,5 +222,14 @@ func applyBoardTrendDefaults(b *BoardTrendConfig) {
 	}
 	if b.GapMS > 5000 {
 		b.GapMS = 5000
+	}
+	if b.AfterCloseMode != "once" && b.AfterCloseMode != "interval" {
+		b.AfterCloseMode = "once"
+	}
+	if b.AfterCloseIntervalSeconds < 60 {
+		b.AfterCloseIntervalSeconds = 60
+	}
+	if b.AfterCloseIntervalSeconds > 1800 {
+		b.AfterCloseIntervalSeconds = 1800
 	}
 }

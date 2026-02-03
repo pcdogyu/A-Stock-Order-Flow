@@ -47,6 +47,7 @@
           <div class="panel">
             <div class="panelTitle">行业求和（折线图）</div>
             <canvas id="homeIndustryChart" class="chartCanvas" height="240"></canvas>
+            <div class="hint tiny" id="homeIndustryHint" hidden>暂无数据</div>
           </div>
         </div>
 
@@ -227,6 +228,17 @@
             <label class="field">
               <span>批次间隔(ms)</span>
               <input type="number" min="100" max="5000" step="100" id="trendGap" value="400" />
+            </label>
+            <label class="field">
+              <span>收盘后补拉模式</span>
+              <select id="trendAfterMode" class="sel">
+                <option value="once">只补拉一次</option>
+                <option value="interval">每 N 秒补拉</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>收盘后补拉间隔(秒)</span>
+              <input type="number" min="60" max="1800" step="60" id="trendAfterInterval" value="300" />
             </label>
             <button type="submit" class="btn">保存走势参数</button>
           </form>

@@ -24,9 +24,11 @@ type Patch struct {
 	MarketAggIntervalSeconds *int  `json:"market_agg_interval_seconds,omitempty"`
 	MarketAggConcurrency     *int  `json:"market_agg_concurrency,omitempty"`
 
-	BoardTrendBatchSize   *int `json:"board_trend_batch_size,omitempty"`
-	BoardTrendConcurrency *int `json:"board_trend_concurrency,omitempty"`
-	BoardTrendGapMS       *int `json:"board_trend_gap_ms,omitempty"`
+	BoardTrendBatchSize                 *int    `json:"board_trend_batch_size,omitempty"`
+	BoardTrendConcurrency               *int    `json:"board_trend_concurrency,omitempty"`
+	BoardTrendGapMS                     *int    `json:"board_trend_gap_ms,omitempty"`
+	BoardTrendAfterCloseMode            *string `json:"board_trend_after_close_mode,omitempty"`
+	BoardTrendAfterCloseIntervalSeconds *int    `json:"board_trend_after_close_interval_seconds,omitempty"`
 }
 
 func (p Patch) Apply(cfg *config.Config) {
@@ -81,5 +83,11 @@ func (p Patch) Apply(cfg *config.Config) {
 	}
 	if p.BoardTrendGapMS != nil {
 		cfg.BoardTrend.GapMS = *p.BoardTrendGapMS
+	}
+	if p.BoardTrendAfterCloseMode != nil {
+		cfg.BoardTrend.AfterCloseMode = *p.BoardTrendAfterCloseMode
+	}
+	if p.BoardTrendAfterCloseIntervalSeconds != nil {
+		cfg.BoardTrend.AfterCloseIntervalSeconds = *p.BoardTrendAfterCloseIntervalSeconds
 	}
 }

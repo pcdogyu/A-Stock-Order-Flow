@@ -71,6 +71,8 @@ function fillConfig(cfg) {
     state.boardTrendCfg.batchSize = cfg.board_trend.batch_size ?? state.boardTrendCfg.batchSize;
     state.boardTrendCfg.concurrency = cfg.board_trend.concurrency ?? state.boardTrendCfg.concurrency;
     state.boardTrendCfg.gapMs = cfg.board_trend.gap_ms ?? state.boardTrendCfg.gapMs;
+    state.boardTrendCfg.afterCloseMode = cfg.board_trend.after_close_mode ?? state.boardTrendCfg.afterCloseMode;
+    state.boardTrendCfg.afterCloseIntervalSeconds = cfg.board_trend.after_close_interval_seconds ?? state.boardTrendCfg.afterCloseIntervalSeconds;
     fillTrendCfgForm();
   }
 
@@ -81,6 +83,8 @@ function fillTrendCfgForm() {
   document.getElementById("trendBatch").value = String(state.boardTrendCfg.batchSize);
   document.getElementById("trendConc").value = String(state.boardTrendCfg.concurrency);
   document.getElementById("trendGap").value = String(state.boardTrendCfg.gapMs);
+  document.getElementById("trendAfterMode").value = state.boardTrendCfg.afterCloseMode;
+  document.getElementById("trendAfterInterval").value = String(state.boardTrendCfg.afterCloseIntervalSeconds);
 }
 
 function fmtMoney(v) {
@@ -135,11 +139,30 @@ function getBJTimeParts() {
   return m;
 }
 
-function isAfterCloseBJ() {
+function getBJWeekday() {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", weekday: "short" }).format(new Date());
+  return wd; // Mon, Tue, Wed, Thu, Fri, Sat, Sun
+}
+
+function isWeekendBJ() {
+  const wd = getBJWeekday();
+  return wd === "Sat" || wd === "Sun";
+}
+
+function getBJMinutes() {
   const t = getBJTimeParts();
   const h = Number(t.hour || 0);
   const m = Number(t.minute || 0);
-  return h > 15 || (h === 15 && m >= 0);
+  return h * 60 + m;
+}
+
+function isBefore0930BJ() {
+  return getBJMinutes() < 9 * 60 + 30;
+}
+
+function isAfterCloseBJ() {
+  const hm = getBJMinutes();
+  return hm >= 15 * 60;
 }
 
 function colorVar(name, fallback) {
@@ -393,6 +416,10 @@ let state = {
     industry: new Map(),
     concept: new Map(),
   },
+  boardList: {
+    industry: [],
+    concept: [],
+  },
   boardTrendRunId: {
     industry: 0,
     concept: 0,
@@ -401,6 +428,8 @@ let state = {
     batchSize: 20,
     concurrency: 2,
     gapMs: 400,
+    afterCloseMode: "once",
+    afterCloseIntervalSeconds: 300,
   },
   marketClosed: false,
 };
@@ -542,9 +571,13 @@ function wire() {
     const batchSize = Number(document.getElementById("trendBatch").value);
     const concurrency = Number(document.getElementById("trendConc").value);
     const gapMs = Number(document.getElementById("trendGap").value);
+    const afterMode = document.getElementById("trendAfterMode").value;
+    const afterInterval = Number(document.getElementById("trendAfterInterval").value);
     state.boardTrendCfg.batchSize = Math.min(100, Math.max(5, Number.isFinite(batchSize) ? batchSize : 20));
     state.boardTrendCfg.concurrency = Math.min(6, Math.max(1, Number.isFinite(concurrency) ? concurrency : 2));
     state.boardTrendCfg.gapMs = Math.min(5000, Math.max(100, Number.isFinite(gapMs) ? gapMs : 400));
+    state.boardTrendCfg.afterCloseMode = (afterMode === "interval") ? "interval" : "once";
+    state.boardTrendCfg.afterCloseIntervalSeconds = Math.min(1800, Math.max(60, Number.isFinite(afterInterval) ? afterInterval : 300));
     fillTrendCfgForm();
     try {
       setPill(true, "saving...");
@@ -552,6 +585,8 @@ function wire() {
         board_trend_batch_size: state.boardTrendCfg.batchSize,
         board_trend_concurrency: state.boardTrendCfg.concurrency,
         board_trend_gap_ms: state.boardTrendCfg.gapMs,
+        board_trend_after_close_mode: state.boardTrendCfg.afterCloseMode,
+        board_trend_after_close_interval_seconds: state.boardTrendCfg.afterCloseIntervalSeconds,
       };
       const cfg = await postJSON("/api/config", payload);
       state.cfg = cfg;
@@ -584,6 +619,7 @@ async function refreshRealtimeOnce() {
       state.marketClosed = true;
       clearTimers();
       setPill(true, "market closed");
+      startMissingTrendRefresh();
     }
   } catch (e) {
     console.error(e);
@@ -596,6 +632,7 @@ async function loadBoardsFor(type, _listId, hintId) {
   const url = `/api/boards?type=${encodeURIComponent(type)}&fid=${encodeURIComponent(fid)}&limit=500`;
   const data = await getJSON(url);
   const boards = Array.isArray(data) ? data : (data.rows || []);
+  state.boardList[type] = boards;
   const boardHint = document.getElementById(hintId);
   if (boardHint) {
     const show = !Array.isArray(data) && !!data.from_live;
@@ -606,6 +643,22 @@ async function loadBoardsFor(type, _listId, hintId) {
   }
   buildBoardGrid(type, boards);
   refreshBoardTrends(type, boards);
+}
+
+function startMissingTrendRefresh() {
+  // Only refresh missing charts after close.
+  const tick = async () => {
+    if (!state.marketClosed) return;
+    await Promise.all([
+      refreshBoardTrends("industry", state.boardList.industry, true),
+      refreshBoardTrends("concept", state.boardList.concept, true),
+    ]);
+  };
+  tick();
+  if (state.boardTrendCfg.afterCloseMode === "interval") {
+    const interval = state.boardTrendCfg.afterCloseIntervalSeconds * 1000;
+    state.timers.push(setInterval(tick, interval));
+  }
 }
 
 function buildBoardGrid(type, boards) {
@@ -667,10 +720,17 @@ async function fetchBoardTrend(boardCode) {
   return await getJSON(url);
 }
 
-async function refreshBoardTrends(type, boards) {
+async function refreshBoardTrends(type, boards, onlyMissing = false) {
   const cache = state.boardCharts[type];
   if (!cache || cache.size === 0) return;
-  const list = (boards || []).map(b => b.code || b.Code).filter(Boolean);
+  let list = (boards || []).map(b => b.code || b.Code).filter(Boolean);
+  if (onlyMissing) {
+    list = list.filter(code => {
+      const entry = cache.get(code);
+      return !(entry && entry.points && entry.points.length >= 2);
+    });
+  }
+  if (list.length === 0) return;
   const runId = ++state.boardTrendRunId[type];
   const batchSize = state.boardTrendCfg.batchSize;
   const concurrency = state.boardTrendCfg.concurrency;
@@ -774,25 +834,97 @@ async function loadHistory() {
 function renderIndustryChartHome(rows) {
   const canvas = document.getElementById("homeIndustryChart");
   if (!canvas) return;
+  const hint = document.getElementById("homeIndustryHint");
+  if (hint) hint.hidden = true;
   const labels = [];
   const values = [];
-  (rows || []).forEach(r => {
+  if (!rows) {
+    if (hint) {
+      hint.textContent = "暂无数据";
+      hint.hidden = false;
+    }
+    return;
+  }
+
+  if (rows.mode === "daily") {
+    const td = rows.tradeDate || "-";
+    const v = Number(rows.value);
+    if (!Number.isFinite(v)) {
+      if (hint) {
+        hint.textContent = "暂无数据";
+        hint.hidden = false;
+      }
+      return;
+    }
+    const mmdd = td.length >= 10 ? td.slice(5, 10) : td;
+    labels.push(`${mmdd} 09:00`, `${mmdd} 15:00`);
+    values.push(v, v);
+    drawLineChart(canvas, labels, values);
+    return;
+  }
+
+  (rows.items || rows || []).forEach(r => {
     const v = Number(r.value ?? r.Value);
     if (!Number.isFinite(v)) return;
     const t = fmtBJTime(r.ts_utc || r.TSUTC || "");
-    labels.push(t === "-" ? "-" : t.slice(5, 16));
+    if (t === "-") return;
+    const hm = Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16));
+    if (hm < 9 * 60 || hm > 15 * 60) return;
+    labels.push(t.slice(5, 16));
     values.push(v);
   });
+  if (labels.length === 0) {
+    if (hint) {
+      hint.textContent = "暂无数据";
+      hint.hidden = false;
+    }
+    return;
+  }
   drawLineChart(canvas, labels, values);
 }
 
 async function loadIndustryChartHome() {
   try {
     const fid = (state.cfg?.market_agg?.fid) || "f62";
-    const url = `/api/history/market_agg?source=industry_sum&fid=${encodeURIComponent(fid)}&kind=rt&limit=200`;
-    const rows = await getJSON(url);
-    state.homeChartRows = rows;
-    renderIndustryChartHome(rows);
+    const loadDailyLast = async () => {
+      const url = `/api/history/market_agg?source=industry_sum&fid=${encodeURIComponent(fid)}&kind=daily&limit=5`;
+      const rows = await getJSON(url);
+      const last = (rows || []).slice(-1)[0];
+      if (last) {
+        state.homeChartRows = { mode: "daily", tradeDate: last.trade_date || last.TradeDate, value: last.value ?? last.Value };
+        renderIndustryChartHome(state.homeChartRows);
+        return true;
+      }
+      return false;
+    };
+
+    const loadRT = async () => {
+      const url = `/api/history/market_agg?source=industry_sum&fid=${encodeURIComponent(fid)}&kind=rt&limit=800`;
+      const rows = await getJSON(url);
+      state.homeChartRows = { mode: "rt", items: rows };
+      renderIndustryChartHome(state.homeChartRows);
+      return Array.isArray(rows) && rows.length > 0;
+    };
+
+    if (isWeekendBJ() || isBefore0930BJ()) {
+      if (!(await loadDailyLast())) {
+        await loadRT();
+      }
+      return;
+    }
+
+    if (isAfterCloseBJ()) {
+      if (state.homeChartRows) {
+        renderIndustryChartHome(state.homeChartRows);
+        return;
+      }
+      if (!(await loadRT())) {
+        await loadDailyLast();
+      }
+      return;
+    }
+
+    await loadRT();
   } catch (e) {
     console.error(e);
   }
@@ -837,6 +969,9 @@ async function bootRoute() {
     await loadIndustryChartHome();
     if (!isAfterCloseBJ()) {
       state.timers.push(setInterval(loadIndustryChartHome, 60000));
+    } else {
+      state.marketClosed = true;
+      startMissingTrendRefresh();
     }
     await refreshBuildInfo();
   } else if (route === "history") {

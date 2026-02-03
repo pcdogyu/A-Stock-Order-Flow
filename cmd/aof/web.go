@@ -337,6 +337,24 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			writeJSON(w, http.StatusOK, map[string]any{"board": board, "points": cached.points, "ts_utc": cached.tsUTC, "cached": true})
 			return
 		}
+		// Prefer SQLite intraday series (from board_rt) to avoid flaky external endpoints.
+		loc, _ := time.LoadLocation("Asia/Shanghai")
+		now := time.Now().In(loc)
+		start := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, loc).UTC()
+		end := time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, loc).UTC()
+		rows, err := sqlite.QueryBoardRTSeriesByCode(db, board, sqlite.FixedRFC3339Nano(start), sqlite.FixedRFC3339Nano(end), 1200)
+		if err == nil && len(rows) >= 2 {
+			points := make([]eastmoney.TrendPoint, 0, len(rows))
+			for _, r := range rows {
+				if ts, err := time.Parse(time.RFC3339Nano, r.TSUTC); err == nil {
+					points = append(points, eastmoney.TrendPoint{TS: ts.In(loc).Format("2006-01-02 15:04:05"), Price: r.Value})
+				}
+			}
+			boardTrendCache.Set(board, points)
+			writeJSON(w, http.StatusOK, map[string]any{"board": board, "points": points, "ts_utc": time.Now().UTC()})
+			return
+		}
+
 		points, err := em.BoardTrends1D(r.Context(), board)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "board": board})
