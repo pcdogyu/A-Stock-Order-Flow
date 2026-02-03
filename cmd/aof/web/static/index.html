@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>A-Stock-Order-Flow Settings</title>
+    <title>A-Stock-Order-Flow</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
@@ -12,9 +12,13 @@
         <div>
           <div class="kicker">A-Stock-Order-Flow</div>
           <h1>资金流向采集器</h1>
-          <p class="sub">
-            免费优先：自选池 + Top榜 + 行业/概念 + 全A分页汇总。这里可以调整实时请求频率与采集策略。
-          </p>
+          <p class="sub">实时看板 + 历史查询 + 设置（配置会写回 YAML）。</p>
+
+          <nav class="nav" id="nav">
+            <a class="tab" href="#/home" data-route="home">首页</a>
+            <a class="tab" href="#/history" data-route="history">历史资金流量</a>
+            <a class="tab" href="#/settings" data-route="settings">设置</a>
+          </nav>
         </div>
         <div class="status" id="status">
           <div class="pill" id="pill">connecting</div>
@@ -25,108 +29,195 @@
         </div>
       </header>
 
-      <section class="card">
+      <!-- Home: realtime dashboard -->
+      <section class="card view" id="viewHome" data-view="home">
         <div class="cardHead">
-          <h2>实时采集频率</h2>
-          <div class="hint">单位：秒（建议 5-60）。修改后会即时生效并写回配置文件。</div>
+          <h2>实时资金流向</h2>
+          <div class="hint">数据来源：内存快照（按 persist.interval_seconds 入库）。</div>
         </div>
 
-        <form id="formRealtime" class="grid">
-          <label class="field">
-            <span>主循环间隔</span>
-            <input type="number" min="1" max="600" step="1" id="rtInterval" />
-          </label>
-          <label class="field fieldToggle">
-            <span>仅交易时段采集</span>
-            <input type="checkbox" id="onlyTradeHours" />
-          </label>
-          <button type="submit" class="btn primary">保存实时设置</button>
-        </form>
+        <div class="grid grid2">
+          <div class="panel">
+            <div class="panelTitle">北向资金（当日）</div>
+            <div class="kv">
+              <div><span class="label">更新时间(UTC)</span> <span class="mono" id="rtTs">-</span></div>
+              <div><span class="label">沪股通 净买入</span> <span class="mono" id="nbSh">-</span></div>
+              <div><span class="label">深股通 净买入</span> <span class="mono" id="nbSz">-</span></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panelTitle">全市场汇总（f62）</div>
+            <div class="kv">
+              <div><span class="label">行业求和</span> <span class="mono" id="aggIndustry">-</span></div>
+              <div><span class="label">全A分页求和</span> <span class="mono" id="aggAll">-</span></div>
+            </div>
+            <div class="hint tiny">如果某项显示为 -，说明该源最近一次抓取失败/尚未抓到。</div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <div class="panelTitle">自选池（主力/超大/大/中/小净流入）</div>
+          <div class="tableWrap">
+            <table class="tbl" id="tblWatch">
+              <thead>
+                <tr>
+                  <th>代码</th><th>名称</th>
+                  <th class="num">主力</th><th class="num">超大</th><th class="num">大单</th><th class="num">中单</th><th class="num">小单</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
-      <section class="card">
+      <!-- History -->
+      <section class="card view" id="viewHistory" data-view="history" hidden>
         <div class="cardHead">
-          <h2>板块采集</h2>
-          <div class="hint">行业较少可全量；概念很多默认只抓 TopN。</div>
+          <h2>历史资金流量</h2>
+          <div class="hint">从 SQLite 读取（默认只保留近 30 天）。</div>
         </div>
 
-        <form id="formBoards" class="grid">
-          <div class="group">
-            <div class="groupTitle">行业</div>
+        <form id="formHistory" class="grid grid2">
+          <label class="field">
+            <span>序列</span>
+            <select id="histSource" class="sel">
+              <option value="industry_sum">行业求和</option>
+              <option value="allstocks_sum">全A分页求和</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>类型</span>
+            <select id="histKind" class="sel">
+              <option value="daily">daily</option>
+              <option value="rt">rt</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>limit</span>
+            <input type="number" min="10" max="2000" step="10" id="histLimit" value="200" />
+          </label>
+          <button type="submit" class="btn primary">加载</button>
+        </form>
+
+        <div class="panel" style="margin-top:12px">
+          <div class="panelTitle">数据</div>
+          <div class="tableWrap">
+            <table class="tbl" id="tblHist">
+              <thead>
+                <tr id="histHead"></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings: old homepage moved here -->
+      <section class="card view" id="viewSettings" data-view="settings" hidden>
+        <div class="cardHead">
+          <h2>设置</h2>
+          <div class="hint">修改后会写回配置文件，并影响运行中的采集任务。</div>
+        </div>
+
+        <section class="subcard">
+          <div class="cardHead">
+            <h2 class="h3">实时采集频率</h2>
+            <div class="hint">单位：秒（建议 5-60）。</div>
+          </div>
+          <form id="formRealtime" class="grid">
+            <label class="field">
+              <span>主循环间隔</span>
+              <input type="number" min="1" max="600" step="1" id="rtInterval" />
+            </label>
+            <label class="field fieldToggle">
+              <span>仅交易时段采集</span>
+              <input type="checkbox" id="onlyTradeHours" />
+            </label>
+            <button type="submit" class="btn primary">保存实时设置</button>
+          </form>
+        </section>
+
+        <section class="subcard">
+          <div class="cardHead">
+            <h2 class="h3">板块采集</h2>
+            <div class="hint">行业较少可全量；概念很多默认只抓 TopN。</div>
+          </div>
+          <form id="formBoards" class="grid">
+            <div class="group">
+              <div class="groupTitle">行业</div>
+              <label class="field fieldToggle">
+                <span>启用</span>
+                <input type="checkbox" id="indEnabled" />
+              </label>
+              <label class="field">
+                <span>间隔(秒)</span>
+                <input type="number" min="5" max="3600" step="1" id="indInterval" />
+              </label>
+            </div>
+
+            <div class="group">
+              <div class="groupTitle">概念</div>
+              <label class="field fieldToggle">
+                <span>启用</span>
+                <input type="checkbox" id="conEnabled" />
+              </label>
+              <label class="field">
+                <span>间隔(秒)</span>
+                <input type="number" min="5" max="3600" step="1" id="conInterval" />
+              </label>
+              <label class="field fieldToggle">
+                <span>抓全量</span>
+                <input type="checkbox" id="conAll" />
+              </label>
+              <label class="field">
+                <span>TopN(非全量)</span>
+                <input type="number" min="10" max="100" step="1" id="conTop" />
+              </label>
+            </div>
+
+            <button type="submit" class="btn primary">保存板块设置</button>
+          </form>
+        </section>
+
+        <section class="subcard">
+          <div class="cardHead">
+            <h2 class="h3">全A分页汇总</h2>
+            <div class="hint">建议 60 秒以上；并发 1-4 更稳。</div>
+          </div>
+          <form id="formAgg" class="grid">
             <label class="field fieldToggle">
               <span>启用</span>
-              <input type="checkbox" id="indEnabled" />
+              <input type="checkbox" id="aggEnabled" />
             </label>
             <label class="field">
               <span>间隔(秒)</span>
-              <input type="number" min="5" max="3600" step="1" id="indInterval" />
-            </label>
-          </div>
-
-          <div class="group">
-            <div class="groupTitle">概念</div>
-            <label class="field fieldToggle">
-              <span>启用</span>
-              <input type="checkbox" id="conEnabled" />
+              <input type="number" min="30" max="3600" step="1" id="aggInterval" />
             </label>
             <label class="field">
-              <span>间隔(秒)</span>
-              <input type="number" min="5" max="3600" step="1" id="conInterval" />
+              <span>并发(1-10)</span>
+              <input type="number" min="1" max="10" step="1" id="aggConc" />
             </label>
-            <label class="field fieldToggle">
-              <span>抓全量</span>
-              <input type="checkbox" id="conAll" />
-            </label>
-            <label class="field">
-              <span>TopN(非全量)</span>
-              <input type="number" min="10" max="100" step="1" id="conTop" />
-            </label>
+            <button type="submit" class="btn primary">保存汇总设置</button>
+          </form>
+        </section>
+
+        <section class="subcard">
+          <div class="cardHead">
+            <h2 class="h3">自选池</h2>
+            <div class="hint">每行一个：如 600519.SH、000001.SZ、920152.BJ</div>
           </div>
-
-          <button type="submit" class="btn primary">保存板块设置</button>
-        </form>
-      </section>
-
-      <section class="card">
-        <div class="cardHead">
-          <h2>全A分页汇总</h2>
-          <div class="hint">
-            通过分页拉取全A约 5506 只股票（100/页）并对 `fid` 求和。免费接口建议 60 秒以上。
-          </div>
-        </div>
-
-        <form id="formAgg" class="grid">
-          <label class="field fieldToggle">
-            <span>启用</span>
-            <input type="checkbox" id="aggEnabled" />
-          </label>
-          <label class="field">
-            <span>间隔(秒)</span>
-            <input type="number" min="30" max="3600" step="1" id="aggInterval" />
-          </label>
-          <label class="field">
-            <span>并发(1-10)</span>
-            <input type="number" min="1" max="10" step="1" id="aggConc" />
-          </label>
-          <button type="submit" class="btn primary">保存汇总设置</button>
-        </form>
-      </section>
-
-      <section class="card">
-        <div class="cardHead">
-          <h2>自选池</h2>
-          <div class="hint">每行一个：如 600519.SH、000001.SZ、920152.BJ</div>
-        </div>
-
-        <form id="formWatch" class="stack">
-          <textarea id="watchlist" rows="6" spellcheck="false"></textarea>
-          <button type="submit" class="btn">保存自选池</button>
-        </form>
+          <form id="formWatch" class="stack">
+            <textarea id="watchlist" rows="6" spellcheck="false"></textarea>
+            <button type="submit" class="btn">保存自选池</button>
+          </form>
+        </section>
       </section>
 
       <footer class="foot">
         <div class="mono">
-          API: <span class="dim">GET</span> /api/config, <span class="dim">POST</span> /api/config
+          API: <span class="dim">GET</span> /api/realtime, <span class="dim">GET</span> /api/config, <span class="dim">POST</span> /api/config
         </div>
       </footer>
     </main>
@@ -134,4 +225,3 @@
     <script src="/static/app.js"></script>
   </body>
 </html>
-

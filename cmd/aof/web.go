@@ -1,26 +1,43 @@
 package main
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/config"
+	"github.com/pcdogyu/A-Stock-Order-Flow/internal/memstore"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/runtimecfg"
+	"github.com/pcdogyu/A-Stock-Order-Flow/internal/store/sqlite"
 )
 
 //go:embed web/static/*
 var webFS embed.FS
 
-func newWebServer(mgr *runtimecfg.Manager) http.Handler {
+func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http.Handler {
+	if mem == nil {
+		mem = memstore.New()
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/realtime", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		snap := mem.Snapshot(time.Now().UTC())
+		writeJSON(w, http.StatusOK, snap)
 	})
 
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +64,39 @@ func newWebServer(mgr *runtimecfg.Manager) http.Handler {
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
+	})
+
+	mux.HandleFunc("/api/history/market_agg", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		kind := r.URL.Query().Get("kind")
+		if kind == "" {
+			kind = "daily"
+		}
+		source := r.URL.Query().Get("source")
+		fid := r.URL.Query().Get("fid")
+		if source == "" || fid == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source and fid are required"})
+			return
+		}
+		limit := parseLimit(r.URL.Query().Get("limit"), 200, 2000)
+		if kind == "rt" {
+			rows, err := sqlite.QueryMarketAggRT(db, source, fid, limit)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, rows)
+			return
+		}
+		rows, err := sqlite.QueryMarketAggDaily(db, source, fid, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
 	})
 
 	// Static UI.
@@ -128,4 +178,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
+}
+
+func parseLimit(s string, def, max int) int {
+	if s == "" {
+		return def
+	}
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	if err != nil || n <= 0 {
+		return def
+	}
+	if n > max {
+		return max
+	}
+	return n
 }

@@ -117,14 +117,14 @@ func (s *Store) SetAgg(tsUTC time.Time, source, fid string, value float64) {
 }
 
 type Snapshot struct {
-	TSUTC time.Time
+	TSUTC time.Time `json:"ts_utc"`
 
-	Northbound *eastmoney.NorthboundRT
-	Fundflow   []eastmoney.FundflowRT
+	Northbound *eastmoney.NorthboundRT `json:"northbound,omitempty"`
+	Fundflow   []eastmoney.FundflowRT `json:"fundflow,omitempty"`
 
-	ToplistByFID map[string][]eastmoney.TopItem
-	BoardsByKey  map[string][]eastmoney.TopItem
-	AggByKey     map[string]float64
+	ToplistByFID map[string][]eastmoney.TopItem `json:"toplist_by_fid,omitempty"`
+	BoardsByKey  map[string][]eastmoney.TopItem `json:"boards_by_key,omitempty"`
+	AggByKey     map[string]float64             `json:"agg_by_key,omitempty"`
 }
 
 func (s *Store) Snapshot(tsUTC time.Time) Snapshot {
@@ -166,4 +166,3 @@ func (s *Store) Snapshot(tsUTC time.Time) Snapshot {
 		AggByKey:     agg,
 	}
 }
-

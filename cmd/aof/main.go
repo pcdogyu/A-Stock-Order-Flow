@@ -107,7 +107,7 @@ func main() {
 		go runCleanupLoop(ctx, mgr, db)
 		go runPersistLoop(ctx, mgr, c)
 
-		srv := newWebServer(mgr)
+		srv := newWebServer(mgr, db, mem)
 		log.Printf("web listening on http://%s", *addr)
 		fatalIf(http.ListenAndServe(*addr, srv))
 	default:
