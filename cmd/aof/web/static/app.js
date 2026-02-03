@@ -402,7 +402,7 @@ function setRoute(route) {
 
 function getRoute() {
   const h = (location.hash || "#/home").replace(/^#\//, "");
-  if (h === "history" || h === "settings" || h === "home") return h;
+  if (h === "history" || h === "settings" || h === "home" || h === "industry" || h === "concept") return h;
   return "home";
 }
 
@@ -946,26 +946,6 @@ async function bootRoute() {
     if (!isAfterCloseBJ()) {
       state.timers.push(setInterval(refreshRealtimeOnce, 10000));
     }
-    try {
-      await Promise.all([
-        loadBoardsFor("industry", null, "boardHintInd"),
-        loadBoardsFor("concept", null, "boardHintCon"),
-      ]);
-    } catch (e) {
-      console.error(e);
-    }
-    if (!isAfterCloseBJ()) {
-      state.timers.push(setInterval(async () => {
-        try {
-          await Promise.all([
-            loadBoardsFor("industry", null, "boardHintInd"),
-            loadBoardsFor("concept", null, "boardHintCon"),
-          ]);
-        } catch (e) {
-          console.error(e);
-        }
-      }, 30000));
-    }
     await loadIndustryChartHome();
     if (!isAfterCloseBJ()) {
       state.timers.push(setInterval(loadIndustryChartHome, 60000));
@@ -974,6 +954,42 @@ async function bootRoute() {
       startMissingTrendRefresh();
     }
     await refreshBuildInfo();
+  } else if (route === "industry") {
+    try {
+      await loadBoardsFor("industry", null, "boardHintInd");
+    } catch (e) {
+      console.error(e);
+    }
+    if (!isAfterCloseBJ()) {
+      state.timers.push(setInterval(async () => {
+        try {
+          await loadBoardsFor("industry", null, "boardHintInd");
+        } catch (e) {
+          console.error(e);
+        }
+      }, 30000));
+    } else {
+      state.marketClosed = true;
+      startMissingTrendRefresh();
+    }
+  } else if (route === "concept") {
+    try {
+      await loadBoardsFor("concept", null, "boardHintCon");
+    } catch (e) {
+      console.error(e);
+    }
+    if (!isAfterCloseBJ()) {
+      state.timers.push(setInterval(async () => {
+        try {
+          await loadBoardsFor("concept", null, "boardHintCon");
+        } catch (e) {
+          console.error(e);
+        }
+      }, 30000));
+    } else {
+      state.marketClosed = true;
+      startMissingTrendRefresh();
+    }
   } else if (route === "history") {
     await loadHistory();
   } else if (route === "settings") {

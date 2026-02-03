@@ -191,15 +191,15 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
   padding:12px;
 }
 .boardPanel{height:560px;display:flex;flex-direction:column}
-.boardPanel .boardGrid{flex:1;display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:10px;overflow:auto;padding-right:4px}
+.boardPanel .boardGrid{flex:1;display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:6px;overflow:visible;padding-right:0}
 .boardCard{
   border:1px solid rgba(34,48,66,.6);
-  border-radius:12px;
+  border-radius:10px;
   background:linear-gradient(180deg, rgba(16,26,36,.65), rgba(11,16,24,.35));
-  padding:8px;
+  padding:6px;
   display:flex;
   flex-direction:column;
-  gap:6px;
+  gap:4px;
 }
 .boardCardTitle{font-family:var(--mono);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .boardCardMeta{display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:12px}
@@ -262,5 +262,5 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
   .grid{grid-template-columns:1fr}
   .grid2{grid-template-columns:1fr}
   .group{grid-template-columns:1fr}
-  .boardPanel .boardGrid{grid-template-columns:1fr}
+  .boardPanel .boardGrid{grid-template-columns:repeat(2, minmax(0, 1fr))}
 }
