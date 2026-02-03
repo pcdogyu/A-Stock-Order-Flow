@@ -307,8 +307,7 @@ async function bootRoute() {
   } else if (route === "history") {
     await loadHistory();
   } else if (route === "settings") {
-    // Keep config in sync while user edits in another terminal/editor.
-    state.timers.push(setInterval(async () => { try { await refreshConfig(); } catch {} }, 5000));
+    // Don't auto-refresh config here; it would overwrite unsaved UI edits.
   }
 }
 
