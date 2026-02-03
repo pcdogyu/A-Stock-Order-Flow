@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/config"
 	"github.com/pcdogyu/A-Stock-Order-Flow/internal/memstore"
@@ -36,7 +35,7 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		snap := mem.Snapshot(time.Now().UTC())
+		snap := mem.SnapshotLatest()
 		writeJSON(w, http.StatusOK, snap)
 	})
 

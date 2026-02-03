@@ -166,3 +166,65 @@ func (s *Store) Snapshot(tsUTC time.Time) Snapshot {
 		AggByKey:     agg,
 	}
 }
+
+// SnapshotLatest returns a snapshot whose timestamp reflects the latest successful in-memory updates.
+// This is intended for the web UI; persistent snapshots should still pass an explicit tsUTC.
+func (s *Store) SnapshotLatest() Snapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var ts time.Time
+	if s.northbound.ok && s.northbound.tsUTC.After(ts) {
+		ts = s.northbound.tsUTC
+	}
+	if s.fundflow.tsUTC.After(ts) {
+		ts = s.fundflow.tsUTC
+	}
+	if s.toplist.tsUTC.After(ts) {
+		ts = s.toplist.tsUTC
+	}
+	if s.boards.tsUTC.After(ts) {
+		ts = s.boards.tsUTC
+	}
+	if s.agg.tsUTC.After(ts) {
+		ts = s.agg.tsUTC
+	}
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
+
+	var nb *eastmoney.NorthboundRT
+	if s.northbound.ok {
+		tmp := s.northbound.val
+		nb = &tmp
+	}
+
+	ff := make([]eastmoney.FundflowRT, 0, len(s.fundflow.byCode))
+	for _, v := range s.fundflow.byCode {
+		ff = append(ff, v)
+	}
+
+	top := make(map[string][]eastmoney.TopItem, len(s.toplist.byFID))
+	for k, v := range s.toplist.byFID {
+		top[k] = append([]eastmoney.TopItem(nil), v...)
+	}
+
+	boards := make(map[string][]eastmoney.TopItem, len(s.boards.byKey))
+	for k, v := range s.boards.byKey {
+		boards[k] = append([]eastmoney.TopItem(nil), v...)
+	}
+
+	agg := make(map[string]float64, len(s.agg.byKey))
+	for k, v := range s.agg.byKey {
+		agg[k] = v
+	}
+
+	return Snapshot{
+		TSUTC:        ts,
+		Northbound:   nb,
+		Fundflow:     ff,
+		ToplistByFID: top,
+		BoardsByKey:  boards,
+		AggByKey:     agg,
+	}
+}

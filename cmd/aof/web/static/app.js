@@ -57,6 +57,26 @@ function fmtMoney(v) {
   return String(Math.round(v));
 }
 
+function fmtBJTime(isoLike) {
+  if (!isoLike) return "-";
+  const d = new Date(isoLike);
+  if (Number.isNaN(d.getTime())) return "-";
+  // Use a stable YYYY-MM-DD HH:mm:ss format.
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const m = {};
+  parts.forEach(p => { if (p.type !== "literal") m[p.type] = p.value; });
+  return `${m.year}-${m.month}-${m.day} ${m.hour}:${m.minute}:${m.second}`;
+}
+
 function setText(id, v) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -64,12 +84,31 @@ function setText(id, v) {
 }
 
 function fillRealtime(snap, cfg) {
-  const ts = snap?.ts_utc ? new Date(snap.ts_utc).toISOString() : "-";
+  const ts = snap?.ts_utc ? fmtBJTime(snap.ts_utc) : "-";
   setText("rtTs", ts);
 
   const nb = snap?.northbound;
-  setText("nbSh", nb ? fmtMoney(nb.SH?.NetBuyAmt ?? nb.sh?.netBuyAmt ?? nb.sh?.net_buy_amt) : "-");
-  setText("nbSz", nb ? fmtMoney(nb.SZ?.NetBuyAmt ?? nb.sz?.netBuyAmt ?? nb.sz?.net_buy_amt) : "-");
+  const nbHint = document.getElementById("nbHint");
+  if (!nb) {
+    setText("nbSh", "-");
+    setText("nbSz", "-");
+    if (nbHint) nbHint.hidden = true;
+  } else {
+    const sh = nb.SH?.NetBuyAmt ?? nb.sh?.netBuyAmt ?? nb.sh?.net_buy_amt;
+    const sz = nb.SZ?.NetBuyAmt ?? nb.sz?.netBuyAmt ?? nb.sz?.net_buy_amt;
+    const shBuy = nb.SH?.BuyAmt ?? nb.sh?.buyAmt ?? nb.sh?.buy_amt;
+    const shSell = nb.SH?.SellAmt ?? nb.sh?.sellAmt ?? nb.sh?.sell_amt;
+    const szBuy = nb.SZ?.BuyAmt ?? nb.sz?.buyAmt ?? nb.sz?.buy_amt;
+    const szSell = nb.SZ?.SellAmt ?? nb.sz?.sellAmt ?? nb.sz?.sell_amt;
+    const looksWithheld = (v) => (v === 0 || v === "0" || v === "0.0");
+    const withheld =
+      looksWithheld(sh) && looksWithheld(sz) &&
+      looksWithheld(shBuy) && looksWithheld(shSell) &&
+      looksWithheld(szBuy) && looksWithheld(szSell);
+    setText("nbSh", withheld ? "-" : fmtMoney(Number(sh)));
+    setText("nbSz", withheld ? "-" : fmtMoney(Number(sz)));
+    if (nbHint) nbHint.hidden = !withheld;
+  }
 
   const agg = snap?.agg_by_key || {};
   const indKey = "industry_sum:" + ((cfg?.industry?.fid) || "f62");
@@ -264,7 +303,7 @@ async function loadHistory() {
       head.appendChild(th("value"));
       rows.forEach(r => {
         const tr = document.createElement("tr");
-        const td1 = document.createElement("td"); td1.textContent = r.ts_utc || r.TSUTC || "-";
+        const td1 = document.createElement("td"); td1.textContent = fmtBJTime(r.ts_utc || r.TSUTC || "");
         const td2 = document.createElement("td"); td2.textContent = fmtMoney(r.value ?? r.Value);
         td2.className = "num";
         tr.appendChild(td1); tr.appendChild(td2);
