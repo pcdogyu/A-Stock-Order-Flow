@@ -107,6 +107,7 @@ h2{margin:0;font-family:var(--serif);font-size:20px}
 
 .grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px;align-items:end}
 .grid2{grid-template-columns:repeat(2, minmax(0, 1fr));align-items:start}
+.grid2 > .panel{align-self:stretch}
 .stack{display:flex;flex-direction:column;gap:10px}
 .group{
   border:1px dashed rgba(34,48,66,.7);
@@ -176,6 +177,9 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
   background:#0b1018;
   padding:12px;
 }
+.boardPanel,.constPanel{min-height:520px}
+.boardPanel{display:flex;flex-direction:column}
+.boardPanel .list{flex:1;max-height:none}
 .panelTitle{
   font-family:var(--mono);
   text-transform:uppercase;
@@ -212,8 +216,8 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
 .item .code{opacity:.75}
 .item .val{font-family:var(--mono);font-size:12px;text-align:right}
 .kv{display:grid;gap:6px}
-.tableWrap{overflow:auto;border-radius:12px;border:1px solid rgba(34,48,66,.6)}
-.tbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+.tableWrap{overflow:auto;border-radius:12px;border:1px solid rgba(34,48,66,.6);width:100%}
+.tbl{width:100%;min-width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
 .tbl th,.tbl td{padding:10px 10px;border-bottom:1px solid rgba(34,48,66,.5);white-space:nowrap}
 .tbl thead th{position:sticky;top:0;background:#0b1018;color:var(--muted);text-align:left}
 .tbl tr:last-child td{border-bottom:none}
