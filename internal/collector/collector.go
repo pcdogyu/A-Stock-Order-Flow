@@ -116,7 +116,7 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 				c.mem.SetBoard(ts, "industry", cfg.Industry.FID, items)
 				var sum float64
 				for _, it := range items {
-					sum += it.Value
+					sum += it.Price
 				}
 				c.mem.SetAgg(ts, "industry_sum", cfg.Industry.FID, sum)
 			}
@@ -267,7 +267,7 @@ func (c *Collector) RunDaily(ctx context.Context, date time.Time) error {
 			_ = sqlite.UpsertBoardDaily(c.db, tradeDate, "industry", cfg.Industry.FID, items)
 			var sum float64
 			for _, it := range items {
-				sum += it.Value
+				sum += it.Price
 			}
 			_ = sqlite.UpsertMarketAggDaily(c.db, tradeDate, "industry_sum", cfg.Industry.FID, sum)
 		}

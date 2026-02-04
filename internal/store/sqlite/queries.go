@@ -19,6 +19,21 @@ type BoardRTPoint struct {
 	Value float64 `json:"value"`
 }
 
+func QueryBoardRTLatestTimestampByCode(db *sql.DB, code string) (string, error) {
+	var ts sql.NullString
+	if err := db.QueryRow(`
+		SELECT MAX(ts_utc)
+		FROM board_rt
+		WHERE code = ?
+	`, code).Scan(&ts); err != nil {
+		return "", err
+	}
+	if !ts.Valid || ts.String == "" {
+		return "", nil
+	}
+	return ts.String, nil
+}
+
 func QueryMarketAggRT(db *sql.DB, source, fid string, limit int) ([]MarketAggRTPoint, error) {
 	if limit <= 0 {
 		limit = 200
@@ -86,7 +101,7 @@ func QueryBoardRTSeriesByCode(db *sql.DB, code, startUTC, endUTC string, limit i
 		limit = 1000
 	}
 	rows, err := db.Query(`
-		SELECT ts_utc, value
+		SELECT ts_utc, price
 		FROM board_rt
 		WHERE code = ? AND ts_utc >= ? AND ts_utc <= ?
 		ORDER BY ts_utc ASC

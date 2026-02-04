@@ -105,6 +105,19 @@ func (s *Store) SetBoard(tsUTC time.Time, boardType, fid string, rows []eastmone
 	s.boards.byKey[key] = append([]eastmoney.TopItem(nil), rows...)
 }
 
+func (s *Store) BoardTS(boardType, fid string) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.boards.byKey == nil {
+		return time.Time{}
+	}
+	key := boardType + ":" + fid
+	if _, ok := s.boards.byKey[key]; !ok {
+		return time.Time{}
+	}
+	return s.boards.tsUTC
+}
+
 func (s *Store) SetAgg(tsUTC time.Time, source, fid string, value float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

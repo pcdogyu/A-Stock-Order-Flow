@@ -295,6 +295,33 @@ function drawLineChart(canvas, labels, values) {
   }
 }
 
+function normalizeBoardTrend(points) {
+  const labels = [];
+  const values = [];
+  if (!Array.isArray(points) || points.length === 0) return { labels, values };
+  let base = null;
+  for (const p of points) {
+    const ts = String(p.ts || p.TS || "");
+    let hm = null;
+    let label = "";
+    if (ts.length >= 16) {
+      hm = Number(ts.slice(11, 13)) * 60 + Number(ts.slice(14, 16));
+      label = ts.slice(11, 16);
+    } else if (ts.length >= 5) {
+      hm = Number(ts.slice(0, 2)) * 60 + Number(ts.slice(3, 5));
+      label = ts.slice(0, 5);
+    }
+    if (hm === null || Number.isNaN(hm)) continue;
+    if (hm < 9 * 60 + 30 || hm > 15 * 60) continue;
+    const v = Number(p.price ?? p.Price);
+    if (!Number.isFinite(v)) continue;
+    if (base === null) base = v;
+    labels.push(label);
+    values.push(v - base);
+  }
+  return { labels, values };
+}
+
 function renderHistoryChart(meta, rows) {
   const panel = document.getElementById("histChartPanel");
   const canvas = document.getElementById("histChart");
@@ -406,8 +433,25 @@ function setRoute(route) {
 
 function getRoute() {
   const h = (location.hash || "#/home").replace(/^#\//, "");
-  if (h === "history" || h === "history-industry" || h === "history-concept" || h === "settings" || h === "home" || h === "industry" || h === "concept") return h;
+  const route = h.split("?")[0];
+  if (route === "history" || route === "history-industry" || route === "history-concept" || route === "settings" || route === "home" || route === "industry" || route === "concept" || route === "trend") return route;
   return "home";
+}
+
+function getRouteQuery() {
+  const h = (location.hash || "#/home").replace(/^#\//, "");
+  const idx = h.indexOf("?");
+  if (idx < 0) return {};
+  const qs = h.slice(idx + 1);
+  const out = {};
+  qs.split("&").forEach(pair => {
+    if (!pair) return;
+    const parts = pair.split("=");
+    const k = decodeURIComponent(parts[0] || "");
+    const v = decodeURIComponent(parts[1] || "");
+    if (k) out[k] = v;
+  });
+  return out;
 }
 
 let state = {
@@ -416,6 +460,7 @@ let state = {
   historyMeta: null,
   historyRows: null,
   homeChartRows: null,
+  trendPoints: null,
   boardCharts: {
     industry: new Map(),
     concept: new Map(),
@@ -440,6 +485,10 @@ let state = {
     industry: 0,
     concept: 0,
   },
+  batchTimers: {
+    industry: null,
+    concept: null,
+  },
   boardTrendCfg: {
     batchSize: 20,
     concurrency: 2,
@@ -453,6 +502,11 @@ let state = {
 function clearTimers() {
   state.timers.forEach(id => clearInterval(id));
   state.timers = [];
+  ["industry", "concept"].forEach(tp => {
+    const id = state.batchTimers?.[tp];
+    if (id) clearInterval(id);
+    if (state.batchTimers) state.batchTimers[tp] = null;
+  });
 }
 
 async function refreshConfig() {
@@ -504,6 +558,9 @@ function wire() {
     }
     if (route === "history-concept") {
       renderBoardDailyFromCache("concept");
+    }
+    if (route === "trend" && state.trendPoints) {
+      renderTrendChart(state.trendPoints);
     }
   });
 
@@ -639,6 +696,19 @@ function wire() {
     ev.preventDefault();
     await loadBoardDailyView("concept");
   });
+
+  document.getElementById("formTrend")?.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const code = String(document.getElementById("trendBoard")?.value || "").trim();
+    await loadTrendView(code);
+  });
+
+  document.getElementById("histIndBatch")?.addEventListener("click", async () => {
+    await startBoardDailyBatch("industry");
+  });
+  document.getElementById("histConBatch")?.addEventListener("click", async () => {
+    await startBoardDailyBatch("concept");
+  });
 }
 
 async function refreshRealtimeOnce() {
@@ -739,9 +809,10 @@ function renderBoardChartsFromCache(type) {
   if (!cache || cache.size === 0) return;
   cache.forEach((v) => {
     if (v.points && v.points.length >= 2) {
-      const labels = v.points.map(p => String(p.ts || p.TS || "").slice(11, 16));
-      const values = v.points.map(p => Number(p.price ?? p.Price));
-      drawLineChart(v.canvas, labels, values);
+      const norm = normalizeBoardTrend(v.points);
+      if (norm.labels.length >= 2) {
+        drawLineChart(v.canvas, norm.labels, norm.values);
+      }
     }
   });
 }
@@ -870,9 +941,112 @@ async function loadBoardDailyView(type) {
   await refreshBoardDaily(type, boards, limit, refresh, false);
 }
 
+function batchStatusId(type) {
+  return type === "industry" ? "histIndBatchStatus" : "histConBatchStatus";
+}
+
+function setBatchStatus(type, text) {
+  const el = document.getElementById(batchStatusId(type));
+  if (el) el.textContent = text;
+}
+
+async function fetchBoardDailyBatchStatus(type) {
+  return await getJSON(`/api/board/daily/batch?type=${encodeURIComponent(type)}`);
+}
+
+function formatBatchStatus(s) {
+  if (!s) return "批量任务：未知";
+  if (!s.running && s.total === 0 && s.ok === 0 && s.failed === 0) {
+    return "批量任务：未启动";
+  }
+  const prog = (s.total > 0) ? `${s.ok + s.failed}/${s.total}` : `${s.ok + s.failed}/?`;
+  const state = s.running ? "运行中" : "已完成";
+  const err = s.last_err ? `，最后错误：${s.last_err}` : "";
+  return `批量任务：${state}，进度 ${prog}，成功 ${s.ok}，失败 ${s.failed}${err}`;
+}
+
+async function pollBoardDailyBatch(type) {
+  try {
+    const s = await fetchBoardDailyBatchStatus(type);
+    setBatchStatus(type, formatBatchStatus(s));
+    if (!s.running && state.batchTimers?.[type]) {
+      clearInterval(state.batchTimers[type]);
+      state.batchTimers[type] = null;
+    }
+  } catch (e) {
+    console.error(e);
+    setBatchStatus(type, "批量任务：状态获取失败");
+  }
+}
+
+async function startBoardDailyBatch(type) {
+  const limitId = type === "industry" ? "histIndLimit" : "histConLimit";
+  const limit = Number(document.getElementById(limitId)?.value || "120");
+  setBatchStatus(type, "批量任务：启动中...");
+  try {
+    await postJSON(`/api/board/daily/batch?type=${encodeURIComponent(type)}&limit=${encodeURIComponent(String(limit))}`, {});
+    await pollBoardDailyBatch(type);
+    if (state.batchTimers?.[type]) clearInterval(state.batchTimers[type]);
+    state.batchTimers[type] = setInterval(() => {
+      pollBoardDailyBatch(type);
+    }, 3000);
+  } catch (e) {
+    console.error(e);
+    setBatchStatus(type, "批量任务：启动失败（可能已有任务在运行）");
+  }
+}
+
 async function fetchBoardTrend(boardCode) {
   const url = `/api/board/trend?board=${encodeURIComponent(boardCode)}`;
   return await getJSON(url);
+}
+
+function renderTrendChart(points) {
+  const canvas = document.getElementById("trendChart");
+  const hint = document.getElementById("trendHint");
+  if (!canvas) return;
+  const norm = normalizeBoardTrend(points);
+  if (norm.labels.length < 2) {
+    if (hint) {
+      hint.textContent = "暂无数据";
+      hint.hidden = false;
+    }
+    return;
+  }
+  if (hint) hint.hidden = true;
+  drawLineChart(canvas, norm.labels, norm.values);
+}
+
+async function loadTrendView(boardCode) {
+  const hint = document.getElementById("trendHint");
+  const input = document.getElementById("trendBoard");
+  const title = document.getElementById("trendTitle");
+  if (hint) {
+    hint.textContent = "加载中...";
+    hint.hidden = false;
+  }
+  const code = String(boardCode || "").trim().toUpperCase();
+  if (input && code) input.value = code;
+  if (!code) {
+    if (hint) {
+      hint.textContent = "请输入板块代码";
+      hint.hidden = false;
+    }
+    return;
+  }
+  try {
+    const data = await fetchBoardTrend(code);
+    const points = data?.points || [];
+    state.trendPoints = points;
+    if (title) title.textContent = `板块趋势（${code}）`;
+    renderTrendChart(points);
+  } catch (e) {
+    console.error(e);
+    if (hint) {
+      hint.textContent = "加载失败";
+      hint.hidden = false;
+    }
+  }
 }
 
 async function refreshBoardTrends(type, boards, onlyMissing = false) {
@@ -904,9 +1078,10 @@ async function refreshBoardTrends(type, boards, onlyMissing = false) {
           const entry = cache.get(code);
           if (entry && points.length >= 2) {
             entry.points = points;
-            const labels = points.map(p => String(p.ts || p.TS || "").slice(11, 16));
-            const values = points.map(p => Number(p.price ?? p.Price));
-            drawLineChart(entry.canvas, labels, values);
+            const norm = normalizeBoardTrend(points);
+            if (norm.labels.length >= 2) {
+              drawLineChart(entry.canvas, norm.labels, norm.values);
+            }
           }
         } catch (e) {
           console.error(e);
@@ -1089,6 +1264,7 @@ async function bootRoute() {
   clearTimers();
   const route = getRoute();
   setRoute(route);
+  state.trendPoints = null;
 
   try {
     await refreshConfig();
@@ -1151,14 +1327,29 @@ async function bootRoute() {
     } catch (e) {
       console.error(e);
     }
+    await pollBoardDailyBatch("industry");
+    if (state.batchTimers?.industry) clearInterval(state.batchTimers.industry);
+    state.batchTimers.industry = setInterval(() => pollBoardDailyBatch("industry"), 3000);
   } else if (route === "history-concept") {
     try {
       await loadBoardDailyView("concept");
     } catch (e) {
       console.error(e);
     }
+    await pollBoardDailyBatch("concept");
+    if (state.batchTimers?.concept) clearInterval(state.batchTimers.concept);
+    state.batchTimers.concept = setInterval(() => pollBoardDailyBatch("concept"), 3000);
   } else if (route === "history") {
     await loadHistory();
+  } else if (route === "trend") {
+    const q = getRouteQuery();
+    const code = q.board ? String(q.board).trim() : "";
+    if (code) {
+      await loadTrendView(code);
+    } else if (document.getElementById("trendHint")) {
+      document.getElementById("trendHint").textContent = "请输入板块代码";
+      document.getElementById("trendHint").hidden = false;
+    }
   } else if (route === "settings") {
     // Don't auto-refresh config here; it would overwrite unsaved UI edits.
   }

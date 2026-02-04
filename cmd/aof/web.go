@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -38,6 +39,7 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 	var rtCacheAt time.Time
 	boardCache := newBoardCache()
 	boardTrendCache := newBoardTrendCache()
+	boardDailyBatch := newBoardDailyBatch()
 	lastCommit := resolveLastCommitTime()
 	mux := http.NewServeMux()
 
@@ -247,7 +249,7 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 				if tp == "industry" {
 					var sum float64
 					for _, it := range items {
-						sum += it.Value
+						sum += it.Price
 					}
 					mem.SetAgg(ts, "industry_sum", fid, sum)
 				}
@@ -409,6 +411,54 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		writeJSON(w, http.StatusOK, out)
 	})
 
+	// Batch load board daily history into SQLite (long running).
+	// POST /api/board/daily/batch?type=concept&limit=360
+	// GET  /api/board/daily/batch?type=concept
+	mux.HandleFunc("/api/board/daily/batch", func(w http.ResponseWriter, r *http.Request) {
+		tp := r.URL.Query().Get("type")
+		if tp == "" {
+			tp = "concept"
+		}
+		if tp != "industry" && tp != "concept" {
+			tp = "concept"
+		}
+		limit := parseLimit(r.URL.Query().Get("limit"), 360, 2000)
+
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, boardDailyBatch.Status(tp))
+			return
+		case http.MethodPost:
+			cfg := mgr.Get()
+			var bcfg config.BoardConfig
+			if tp == "concept" {
+				bcfg = cfg.Concept
+			} else {
+				bcfg = cfg.Industry
+			}
+			if bcfg.FS == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "board fs not configured"})
+				return
+			}
+			fid := bcfg.FID
+			if fid == "" {
+				fid = "f62"
+			}
+			ok := boardDailyBatch.Start(tp, func(job *boardDailyJob) {
+				runBoardDailyBatch(job, em, db, tp, bcfg.FS, fid, limit)
+			})
+			if !ok {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "batch already running"})
+				return
+			}
+			writeJSON(w, http.StatusAccepted, boardDailyBatch.Status(tp))
+			return
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+	})
+
 	// Board intraday trend (today):
 	// GET /api/board/trend?board=BK0457
 	mux.HandleFunc("/api/board/trend", func(w http.ResponseWriter, r *http.Request) {
@@ -428,8 +478,17 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		// Prefer SQLite intraday series (from board_rt) to avoid flaky external endpoints.
 		loc, _ := time.LoadLocation("Asia/Shanghai")
 		now := time.Now().In(loc)
-		start := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, loc).UTC()
-		end := time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, loc).UTC()
+		trendDay := now
+		hm := now.Hour()*60 + now.Minute()
+		if hm < 9*60+30 {
+			if ts, err := sqlite.QueryBoardRTLatestTimestampByCode(db, board); err == nil && ts != "" {
+				if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+					trendDay = t.In(loc)
+				}
+			}
+		}
+		start := time.Date(trendDay.Year(), trendDay.Month(), trendDay.Day(), 9, 0, 0, 0, loc).UTC()
+		end := time.Date(trendDay.Year(), trendDay.Month(), trendDay.Day(), 15, 0, 0, 0, loc).UTC()
 		rows, err := sqlite.QueryBoardRTSeriesByCode(db, board, sqlite.FixedRFC3339Nano(start), sqlite.FixedRFC3339Nano(end), 1200)
 		if err == nil && len(rows) >= 2 {
 			points := make([]eastmoney.TrendPoint, 0, len(rows))
@@ -666,6 +725,184 @@ func logRequests(next http.Handler) http.Handler {
 		log.Printf("%s %s", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
+}
+
+type boardDailyBatch struct {
+	mu   sync.Mutex
+	jobs map[string]*boardDailyJob
+}
+
+type boardDailyJob struct {
+	mu        sync.Mutex
+	running   bool
+	startedAt time.Time
+	updatedAt time.Time
+	total     int
+	ok        int
+	failed    int
+	lastErr   string
+}
+
+type boardDailyStatus struct {
+	Type      string `json:"type"`
+	Running   bool   `json:"running"`
+	StartedAt string `json:"started_at"`
+	UpdatedAt string `json:"updated_at"`
+	Total     int    `json:"total"`
+	Ok        int    `json:"ok"`
+	Failed    int    `json:"failed"`
+	LastErr   string `json:"last_err,omitempty"`
+}
+
+func newBoardDailyBatch() *boardDailyBatch {
+	return &boardDailyBatch{jobs: make(map[string]*boardDailyJob)}
+}
+
+func (b *boardDailyBatch) get(tp string) *boardDailyJob {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	job := b.jobs[tp]
+	if job == nil {
+		job = &boardDailyJob{}
+		b.jobs[tp] = job
+	}
+	return job
+}
+
+func (b *boardDailyBatch) Start(tp string, run func(job *boardDailyJob)) bool {
+	job := b.get(tp)
+	job.mu.Lock()
+	if job.running {
+		job.mu.Unlock()
+		return false
+	}
+	job.running = true
+	job.startedAt = time.Now().UTC()
+	job.updatedAt = job.startedAt
+	job.total = 0
+	job.ok = 0
+	job.failed = 0
+	job.lastErr = ""
+	job.mu.Unlock()
+
+	go run(job)
+	return true
+}
+
+func (b *boardDailyBatch) Status(tp string) boardDailyStatus {
+	job := b.get(tp)
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	return boardDailyStatus{
+		Type:      tp,
+		Running:   job.running,
+		StartedAt: formatRFC3339Nano(job.startedAt),
+		UpdatedAt: formatRFC3339Nano(job.updatedAt),
+		Total:     job.total,
+		Ok:        job.ok,
+		Failed:    job.failed,
+		LastErr:   job.lastErr,
+	}
+}
+
+func (j *boardDailyJob) setTotal(n int) {
+	j.mu.Lock()
+	j.total = n
+	j.updatedAt = time.Now().UTC()
+	j.mu.Unlock()
+}
+
+func (j *boardDailyJob) markOk() {
+	j.mu.Lock()
+	j.ok++
+	j.updatedAt = time.Now().UTC()
+	j.mu.Unlock()
+}
+
+func (j *boardDailyJob) markFail(err error) {
+	j.mu.Lock()
+	j.failed++
+	if err != nil {
+		j.lastErr = err.Error()
+	}
+	j.updatedAt = time.Now().UTC()
+	j.mu.Unlock()
+}
+
+func (j *boardDailyJob) finish() {
+	j.mu.Lock()
+	j.running = false
+	j.updatedAt = time.Now().UTC()
+	j.mu.Unlock()
+}
+
+func runBoardDailyBatch(job *boardDailyJob, em *eastmoney.Client, db *sql.DB, tp, fs, fid string, limit int) {
+	defer job.finish()
+	ctx := context.Background()
+	items, err := em.BoardListAll(ctx, fs, fid)
+	if err != nil {
+		job.markFail(err)
+		return
+	}
+	job.setTotal(len(items))
+	nameByCode := make(map[string]string, len(items))
+	for _, it := range items {
+		if it.Code != "" {
+			nameByCode[it.Code] = it.Name
+		}
+	}
+
+	for _, it := range items {
+		code := it.Code
+		if code == "" {
+			job.markFail(fmt.Errorf("empty board code"))
+			continue
+		}
+		rows, err := em.BoardFundflowDailySeries(ctx, code, limit)
+		if err != nil {
+			job.markFail(err)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if len(rows) == 0 {
+			job.markFail(fmt.Errorf("empty series for %s", code))
+			time.Sleep(120 * time.Millisecond)
+			continue
+		}
+		series := make([]sqlite.BoardDailySeriesPoint, 0, len(rows))
+		for _, row := range rows {
+			name := row.Name
+			if name == "" {
+				name = nameByCode[code]
+			}
+			c := row.Code
+			if c == "" {
+				c = code
+			}
+			series = append(series, sqlite.BoardDailySeriesPoint{
+				TradeDate: row.TradeDate,
+				Code:      c,
+				Name:      name,
+				Value:     row.NetMain,
+				Price:     0,
+				Pct:       0,
+			})
+		}
+		if err := sqlite.UpsertBoardDailySeries(db, tp, fid, series); err != nil {
+			job.markFail(err)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		job.markOk()
+		time.Sleep(120 * time.Millisecond)
+	}
+}
+
+func formatRFC3339Nano(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 type configView struct {

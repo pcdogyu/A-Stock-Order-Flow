@@ -74,6 +74,7 @@ func (c *Client) clistPage(ctx context.Context, fs, fid string, pn, pz int) (tot
 	q.Set("np", "1")
 	q.Set("fltt", "2")
 	q.Set("invt", "2")
+	q.Set("_", strconv.FormatInt(time.Now().UnixMilli(), 10))
 	q.Set("fid", fid)
 	q.Set("fs", fs)
 	q.Set("fields", "f12,f14,f2,f3,"+fid)
