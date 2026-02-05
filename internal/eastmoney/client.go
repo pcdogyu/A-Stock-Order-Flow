@@ -278,5 +278,12 @@ func (c *Client) getJSON(ctx context.Context, u string, out any) error {
 			return nil
 		}
 	}
+	// On Windows, some endpoints may terminate Go TLS handshakes (EOF).
+	// Fall back to PowerShell which uses the system HTTP stack.
+	if strings.Contains(u, "/api/qt/stock/trends2/get") {
+		if err := getJSONViaPowerShell(ctx, u, out); err == nil {
+			return nil
+		}
+	}
 	return lastErr
 }

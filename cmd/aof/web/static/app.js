@@ -322,6 +322,33 @@ function normalizeBoardTrend(points) {
   return { labels, values };
 }
 
+function trendToSeries(points, startMin, endMin, labelMode) {
+  const labels = [];
+  const values = [];
+  (points || []).forEach(p => {
+    const ts = String(p.ts || p.TS || "");
+    let hm = null;
+    let label = "";
+    if (ts.length >= 19) {
+      hm = Number(ts.slice(11, 13)) * 60 + Number(ts.slice(14, 16));
+      label = (labelMode === "sec") ? ts.slice(5, 19) : ts.slice(11, 16);
+    } else if (ts.length >= 16) {
+      hm = Number(ts.slice(11, 13)) * 60 + Number(ts.slice(14, 16));
+      label = ts.slice(11, 16);
+    } else if (ts.length >= 5) {
+      hm = Number(ts.slice(0, 2)) * 60 + Number(ts.slice(3, 5));
+      label = ts.slice(0, 5);
+    }
+    if (hm === null || Number.isNaN(hm)) return;
+    if (hm < startMin || hm > endMin) return;
+    const v = Number(p.price ?? p.Price ?? p.value ?? p.Value);
+    if (!Number.isFinite(v)) return;
+    labels.push(label);
+    values.push(v);
+  });
+  return { labels, values };
+}
+
 function renderHistoryChart(meta, rows) {
   const panel = document.getElementById("histChartPanel");
   const canvas = document.getElementById("histChart");
@@ -460,7 +487,9 @@ let state = {
   historyMeta: null,
   historyRows: null,
   homeChartRows: null,
+  homeIndex: null,
   trendPoints: null,
+  dailyObserver: null,
   boardCharts: {
     industry: new Map(),
     concept: new Map(),
@@ -498,6 +527,18 @@ let state = {
   },
   marketClosed: false,
 };
+
+function setLoadStatus(type, text, show) {
+  const id = type === "industry" ? "histIndLoadStatus" : "histConLoadStatus";
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (show === false) {
+    el.hidden = true;
+    return;
+  }
+  el.textContent = text || "";
+  el.hidden = false;
+}
 
 function clearTimers() {
   state.timers.forEach(id => clearInterval(id));
@@ -548,6 +589,10 @@ function wire() {
     }
     if (route === "home" && state.homeChartRows) {
       renderIndustryChartHome(state.homeChartRows);
+    }
+    if (route === "home" && state.homeIndex) {
+      renderIndexChartHome("homeSHChart", "homeSHHint", state.homeIndex.shPts);
+      renderIndexChartHome("homeSZChart", "homeSZHint", state.homeIndex.szPts);
     }
     if (route === "home") {
       renderBoardChartsFromCache("industry");
@@ -692,10 +737,14 @@ function wire() {
     ev.preventDefault();
     await loadBoardDailyView("industry");
   });
+  document.getElementById("histIndSort")?.addEventListener("change", () => sortBoardDailyGrid("industry"));
+  document.getElementById("histIndFilter")?.addEventListener("change", () => sortBoardDailyGrid("industry"));
   document.getElementById("formHistCon")?.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     await loadBoardDailyView("concept");
   });
+  document.getElementById("histConSort")?.addEventListener("change", () => sortBoardDailyGrid("concept"));
+  document.getElementById("histConFilter")?.addEventListener("change", () => sortBoardDailyGrid("concept"));
 
   document.getElementById("formTrend")?.addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -823,6 +872,7 @@ function buildBoardDailyGrid(type, boards) {
   if (!grid) return;
   grid.innerHTML = "";
   const map = new Map();
+  ensureDailyObserver();
   (boards || []).forEach(b => {
     const code = b.code || b.Code || "";
     if (!code) return;
@@ -852,9 +902,91 @@ function buildBoardDailyGrid(type, boards) {
     card.appendChild(canvas);
     grid.appendChild(card);
 
-    map.set(code, { canvas, title, meta, name: b.name || "-", points: null, valEl: val, dateEl: date });
+    state.dailyObserver.observe(card);
+    map.set(code, { card, canvas, title, meta, name: b.name || "-", points: null, valEl: val, dateEl: date, inView: false, rendered: false });
   });
   state.boardDailyCharts[type] = map;
+}
+
+function ensureDailyObserver() {
+  if (state.dailyObserver) return state.dailyObserver;
+  state.dailyObserver = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      const card = e.target;
+      if (!card || !card.dataset) return;
+      const code = card.dataset.code || "";
+      if (!code) return;
+      ["industry", "concept"].forEach(tp => {
+        const cache = state.boardDailyCharts[tp];
+        const entry = cache?.get(code);
+        if (!entry) return;
+        entry.inView = !!e.isIntersecting;
+        if (entry.inView && entry.points && entry.points.length >= 2 && !entry.rendered) {
+          drawBoardDailyEntry(entry);
+        }
+      });
+    });
+  }, { root: null, rootMargin: "120px", threshold: 0.01 });
+  return state.dailyObserver;
+}
+
+function drawBoardDailyEntry(entry) {
+  if (!entry || !entry.canvas || !entry.points || entry.points.length < 2) return;
+  const labels = entry.points.map(p => String(p.trade_date || p.TradeDate || "").slice(5));
+  const values = entry.points.map(p => Number(p.value ?? p.Value));
+  drawLineChart(entry.canvas, labels, values);
+  entry.rendered = true;
+}
+
+function getDailySortIds(type) {
+  return type === "industry"
+    ? { sort: "histIndSort", filter: "histIndFilter", grid: "boardGridHistInd" }
+    : { sort: "histConSort", filter: "histConFilter", grid: "boardGridHistCon" };
+}
+
+function lastPointValue(entry) {
+  const pts = entry?.points || [];
+  if (!pts.length) return null;
+  const last = pts[pts.length - 1];
+  const v = Number(last.value ?? last.Value);
+  return Number.isFinite(v) ? v : null;
+}
+
+function sortBoardDailyGrid(type) {
+  const ids = getDailySortIds(type);
+  const sortMode = String(document.getElementById(ids.sort)?.value || "value_desc");
+  const filterMode = String(document.getElementById(ids.filter)?.value || "all");
+  const grid = document.getElementById(ids.grid);
+  const cache = state.boardDailyCharts[type];
+  if (!grid || !cache || cache.size === 0) return;
+
+  const entries = [];
+  cache.forEach((entry, code) => {
+    const v = lastPointValue(entry);
+    // Keep unloaded entries at bottom.
+    const name = String(entry?.name || "").toLowerCase();
+    if (filterMode === "in" && (v === null || v <= 0)) return;
+    if (filterMode === "out" && (v === null || v >= 0)) return;
+    entries.push({ code, entry, v, name });
+  });
+
+  const cmp = (a, b) => {
+    // Always push null values to the end.
+    const an = (a.v === null), bn = (b.v === null);
+    if (an !== bn) return an ? 1 : -1;
+    if (sortMode === "value_asc") return (a.v ?? 0) - (b.v ?? 0);
+    if (sortMode === "abs_desc") return Math.abs(b.v ?? 0) - Math.abs(a.v ?? 0);
+    if (sortMode === "name_asc") return a.name.localeCompare(b.name);
+    // value_desc default
+    return (b.v ?? 0) - (a.v ?? 0);
+  };
+  entries.sort(cmp);
+
+  // Reorder cards in the grid by moving existing nodes.
+  grid.innerHTML = "";
+  entries.forEach(({ entry }) => {
+    if (entry?.card) grid.appendChild(entry.card);
+  });
 }
 
 function renderBoardDailyFromCache(type) {
@@ -862,9 +994,9 @@ function renderBoardDailyFromCache(type) {
   if (!cache || cache.size === 0) return;
   cache.forEach((v) => {
     if (v.points && v.points.length >= 2) {
-      const labels = v.points.map(p => String(p.trade_date || p.TradeDate || "").slice(5));
-      const values = v.points.map(p => Number(p.value ?? p.Value));
-      drawLineChart(v.canvas, labels, values);
+      if (!v.rendered && v.inView) {
+        drawBoardDailyEntry(v);
+      }
     }
   });
 }
@@ -889,6 +1021,9 @@ async function refreshBoardDaily(type, boards, limit, refresh, onlyMissing = fal
   const batchSize = state.boardTrendCfg.batchSize;
   const concurrency = Math.max(1, Math.min(6, state.boardTrendCfg.concurrency || 2));
   let offset = 0;
+  let done = 0;
+  const total = list.length;
+  setLoadStatus(type, `加载中... 0/${total}`, true);
   while (offset < list.length) {
     if (state.boardDailyRunId[type] !== runId) return;
     const batch = list.slice(offset, offset + batchSize);
@@ -903,25 +1038,37 @@ async function refreshBoardDaily(type, boards, limit, refresh, onlyMissing = fal
           const entry = cache.get(code);
           if (entry && points.length >= 2) {
             entry.points = points;
-            const labels = points.map(p => String(p.trade_date || p.TradeDate || "").slice(5));
-            const values = points.map(p => Number(p.value ?? p.Value));
-            drawLineChart(entry.canvas, labels, values);
+            entry.rendered = false;
+            if (entry.inView) {
+              drawBoardDailyEntry(entry);
+            }
             const last = points[points.length - 1];
-            if (entry.valEl) entry.valEl.textContent = fmtMoney(Number(last.value ?? last.Value));
+            if (entry.valEl) {
+              const lv = Number(last.value ?? last.Value);
+              entry.valEl.textContent = Number.isFinite(lv) ? (lv > 0 ? "+" : "") + fmtMoney(lv) : "-";
+            }
             if (entry.dateEl) entry.dateEl.textContent = String(last.trade_date || last.TradeDate || "-");
           }
         } catch (e) {
           console.error(e);
+        } finally {
+          done++;
+          if (done % 10 === 0 || done === total) {
+            setLoadStatus(type, `加载中... ${done}/${total}`, true);
+          }
         }
       }
     };
     const workers = [];
     for (let i = 0; i < concurrency; i++) workers.push(run());
     await Promise.all(workers);
+    sortBoardDailyGrid(type);
     if (offset < list.length) {
       await new Promise(r => setTimeout(r, state.boardTrendCfg.gapMs));
     }
   }
+  sortBoardDailyGrid(type);
+  setLoadStatus(type, "", false);
 }
 
 async function loadBoardDailyView(type) {
@@ -938,7 +1085,9 @@ async function loadBoardDailyView(type) {
   const boards = Array.isArray(data) ? data : (data.rows || []);
   state.boardDailyList[type] = boards;
   buildBoardDailyGrid(type, boards);
-  await refreshBoardDaily(type, boards, limit, refresh, false);
+  // Don't block UI; fetch in background.
+  refreshBoardDaily(type, boards, limit, refresh, false);
+  sortBoardDailyGrid(type);
 }
 
 function batchStatusId(type) {
@@ -1187,7 +1336,7 @@ function renderIndustryChartHome(rows) {
       return;
     }
     const mmdd = td.length >= 10 ? td.slice(5, 10) : td;
-    labels.push(`${mmdd} 09:00`, `${mmdd} 15:00`);
+    labels.push(`${mmdd} 09:30`, `${mmdd} 15:00`);
     values.push(v, v);
     drawLineChart(canvas, labels, values);
     return;
@@ -1199,10 +1348,14 @@ function renderIndustryChartHome(rows) {
     const t = fmtBJTime(r.ts_utc || r.TSUTC || "");
     if (t === "-") return;
     const hm = Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16));
-    if (hm < 9 * 60 || hm > 15 * 60) return;
-    labels.push(t.slice(5, 16));
+    if (hm < 9 * 60 + 30 || hm > 15 * 60) return;
+    labels.push(t.slice(5, 19)); // include seconds for 30s cadence
     values.push(v);
   });
+  if (labels.length === 1) {
+    labels.push(labels[0]);
+    values.push(values[0]);
+  }
   if (labels.length === 0) {
     if (hint) {
       hint.textContent = "暂无数据";
@@ -1213,9 +1366,79 @@ function renderIndustryChartHome(rows) {
   drawLineChart(canvas, labels, values);
 }
 
+function renderIndexChartHome(canvasId, hintId, points) {
+  const canvas = document.getElementById(canvasId);
+  const hint = document.getElementById(hintId);
+  if (!canvas) return;
+  const s = trendToSeries(points, 9 * 60 + 30, 15 * 60, "hm");
+  if (s.labels.length < 2) {
+    if (hint) {
+      hint.textContent = "暂无数据";
+      hint.hidden = false;
+    }
+    return;
+  }
+  if (hint) hint.hidden = true;
+  drawLineChart(canvas, s.labels, s.values);
+}
+
+async function loadIndexChartsHome() {
+  // Use Eastmoney "secid" explicitly to avoid ambiguity with stock codes (e.g. 000001 is both stock and index).
+  const load = async (secid) => {
+    const data = await getJSON(`/api/secid/trend?secid=${encodeURIComponent(secid)}`);
+    return data?.points || [];
+  };
+  try {
+    const [shPts, szPts] = await Promise.all([
+      load("1.000001"), // 上证指数
+      load("0.399001"), // 深证成指
+    ]);
+    state.homeIndex = { shPts, szPts };
+    renderIndexChartHome("homeSHChart", "homeSHHint", shPts);
+    renderIndexChartHome("homeSZChart", "homeSZHint", szPts);
+  } catch (e) {
+    console.error(e);
+    const showErr = (hintId) => {
+      const hint = document.getElementById(hintId);
+      if (!hint) return;
+      hint.textContent = "加载失败";
+      hint.hidden = false;
+    };
+    showErr("homeSHHint");
+    showErr("homeSZHint");
+  }
+}
+
 async function loadIndustryChartHome() {
   try {
     const fid = (state.cfg?.market_agg?.fid) || "f62";
+    const loadPriceSumBackfill = async () => {
+      const url = `/api/history/board_price_sum?type=industry&fid=${encodeURIComponent(fid)}&limit=1200`;
+      const rows = await getJSON(url);
+      if (!Array.isArray(rows) || rows.length === 0) return false;
+      state.homeChartRows = { mode: "rt", items: rows };
+      renderIndustryChartHome(state.homeChartRows);
+      return true;
+    };
+    const loadFromBoards = async () => {
+      const url = `/api/boards?type=industry&fid=${encodeURIComponent(fid)}&limit=500`;
+      const data = await getJSON(url);
+      const rows = Array.isArray(data) ? data : (data.rows || []);
+      if (!rows || rows.length === 0) return false;
+      let sum = 0;
+      rows.forEach(r => {
+        const v = Number(r.price ?? r.Price);
+        if (Number.isFinite(v)) sum += v;
+      });
+      if (!Number.isFinite(sum)) return false;
+      const item = { ts_utc: new Date().toISOString(), value: sum };
+      if (!state.homeChartRows || state.homeChartRows.mode !== "rt") {
+        state.homeChartRows = { mode: "rt", items: [] };
+      }
+      state.homeChartRows.items = (state.homeChartRows.items || []).concat([item]).slice(-800);
+      renderIndustryChartHome(state.homeChartRows);
+      return true;
+    };
     const loadDailyLast = async () => {
       const url = `/api/history/market_agg?source=industry_sum&fid=${encodeURIComponent(fid)}&kind=daily&limit=5`;
       const rows = await getJSON(url);
@@ -1254,7 +1477,13 @@ async function loadIndustryChartHome() {
       return;
     }
 
-    await loadRT();
+    // During trading hours, prefer live board sum to avoid stale rt snapshots.
+    if (!state.homeChartRows || state.homeChartRows.mode !== "rt" || !(state.homeChartRows.items || []).length) {
+      await loadPriceSumBackfill();
+    }
+    if (!(await loadFromBoards())) {
+      await loadRT();
+    }
   } catch (e) {
     console.error(e);
   }
@@ -1265,6 +1494,7 @@ async function bootRoute() {
   const route = getRoute();
   setRoute(route);
   state.trendPoints = null;
+  state.homeIndex = null;
 
   try {
     await refreshConfig();
@@ -1279,10 +1509,14 @@ async function bootRoute() {
     }
     await loadIndustryChartHome();
     if (!isAfterCloseBJ()) {
-      state.timers.push(setInterval(loadIndustryChartHome, 60000));
+      state.timers.push(setInterval(loadIndustryChartHome, 30000));
     } else {
       state.marketClosed = true;
       startMissingTrendRefresh();
+    }
+    await loadIndexChartsHome();
+    if (!isAfterCloseBJ()) {
+      state.timers.push(setInterval(loadIndexChartsHome, 30000));
     }
     await refreshBuildInfo();
   } else if (route === "industry") {

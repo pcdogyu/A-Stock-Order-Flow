@@ -198,8 +198,8 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent)}
   background:#0b1018;
   padding:12px;
 }
-.boardPanel{height:560px;display:flex;flex-direction:column}
-.boardPanel .boardGrid{flex:1;display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:6px;overflow:visible;padding-right:0}
+.boardPanel{min-height:560px;display:flex;flex-direction:column}
+.boardPanel .boardGrid{flex:1;display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:6px;overflow:auto;padding-right:4px}
 .boardCard{
   border:1px solid rgba(34,48,66,.6);
   border-radius:10px;

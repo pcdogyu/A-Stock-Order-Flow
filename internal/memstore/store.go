@@ -19,7 +19,7 @@ type Store struct {
 	}
 
 	fundflow struct {
-		tsUTC time.Time
+		tsUTC  time.Time
 		byCode map[string]eastmoney.FundflowRT
 	}
 
@@ -133,7 +133,7 @@ type Snapshot struct {
 	TSUTC time.Time `json:"ts_utc"`
 
 	Northbound *eastmoney.NorthboundRT `json:"northbound,omitempty"`
-	Fundflow   []eastmoney.FundflowRT `json:"fundflow,omitempty"`
+	Fundflow   []eastmoney.FundflowRT  `json:"fundflow,omitempty"`
 
 	ToplistByFID map[string][]eastmoney.TopItem `json:"toplist_by_fid,omitempty"`
 	BoardsByKey  map[string][]eastmoney.TopItem `json:"boards_by_key,omitempty"`

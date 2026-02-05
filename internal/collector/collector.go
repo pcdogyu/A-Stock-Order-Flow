@@ -29,6 +29,7 @@ type Collector struct {
 	lastIndustry time.Time
 	lastConcept  time.Time
 	lastAllStocks time.Time
+	lastToplist  []eastmoney.TopItem
 }
 
 func New(cfgp ConfigProvider, db *sql.DB, mem *memstore.Store) *Collector {
@@ -101,9 +102,16 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 	// 3) Top list by net main inflow (or any Eastmoney fid field)
 	top, err := c.em.TopListDynamic(ctx, cfg.Toplist.FS, cfg.Toplist.FID, cfg.Toplist.Size)
 	if err != nil {
-		return fmt.Errorf("toplist rt: %w", err)
+		if len(c.lastToplist) > 0 {
+			log.Printf("toplist rt err: %v (use cache)", err)
+			c.mem.SetToplist(ts, cfg.Toplist.FID, c.lastToplist)
+		} else {
+			return fmt.Errorf("toplist rt: %w", err)
+		}
+	} else {
+		c.mem.SetToplist(ts, cfg.Toplist.FID, top)
+		c.lastToplist = append([]eastmoney.TopItem(nil), top...)
 	}
-	c.mem.SetToplist(ts, cfg.Toplist.FID, top)
 
 	// 4) Industry / Concept boards + whole-market aggregate (computed from industry sum)
 	if cfg.Industry.Enabled {
@@ -165,6 +173,27 @@ func (c *Collector) collectRealtimeOnce(ctx context.Context, now time.Time, cfg 
 // Caller controls the interval.
 func (c *Collector) PersistRealtimeSnapshot(tsUTC time.Time) error {
 	snap := c.mem.Snapshot(tsUTC)
+	agg := snap.AggByKey
+	if agg == nil {
+		agg = make(map[string]float64)
+	}
+	// Ensure industry_sum is available even if realtime agg wasn't set.
+	for key, rows := range snap.BoardsByKey {
+		bt, fid, ok := split2(key)
+		if !ok || bt != "industry" {
+			continue
+		}
+		aggKey := "industry_sum:" + fid
+		if _, exists := agg[aggKey]; exists {
+			continue
+		}
+		var sum float64
+		for _, it := range rows {
+			sum += it.Price
+		}
+		agg[aggKey] = sum
+	}
+
 	if snap.Northbound != nil {
 		if err := sqlite.UpsertNorthboundRT(c.db, tsUTC, *snap.Northbound); err != nil {
 			return err
@@ -187,7 +216,7 @@ func (c *Collector) PersistRealtimeSnapshot(tsUTC time.Time) error {
 			return err
 		}
 	}
-	for key, v := range snap.AggByKey {
+	for key, v := range agg {
 		source, fid, ok := split2(key)
 		if !ok {
 			continue

@@ -44,6 +44,37 @@ func QueryBoardSumRT(db *sql.DB, boardType, fid string, limit int) ([]BoardSumRT
 	return out, nil
 }
 
+func QueryBoardPriceSumRT(db *sql.DB, boardType, fid, startUTC, endUTC string, limit int) ([]BoardSumRTPoint, error) {
+	if limit <= 0 {
+		limit = 1200
+	}
+	rows, err := db.Query(`
+		SELECT ts_utc, SUM(price) AS v
+		FROM board_rt
+		WHERE board_type = ? AND fid = ? AND ts_utc >= ? AND ts_utc <= ?
+		GROUP BY ts_utc
+		ORDER BY ts_utc ASC
+		LIMIT ?
+	`, boardType, fid, startUTC, endUTC, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]BoardSumRTPoint, 0, limit)
+	for rows.Next() {
+		var p BoardSumRTPoint
+		if err := rows.Scan(&p.TSUTC, &p.Value); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func QueryBoardSumDaily(db *sql.DB, boardType, fid string, limit int) ([]BoardSumDailyPoint, error) {
 	if limit <= 0 {
 		limit = 200
@@ -75,4 +106,3 @@ func QueryBoardSumDaily(db *sql.DB, boardType, fid string, limit int) ([]BoardSu
 	reverse(out)
 	return out, nil
 }
-

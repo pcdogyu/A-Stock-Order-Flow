@@ -39,6 +39,7 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 	var rtCacheAt time.Time
 	boardCache := newBoardCache()
 	boardTrendCache := newBoardTrendCache()
+	secidTrendCache := newBoardTrendCache()
 	boardDailyBatch := newBoardDailyBatch()
 	lastCommit := resolveLastCommitTime()
 	mux := http.NewServeMux()
@@ -186,6 +187,38 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 		writeJSON(w, http.StatusOK, rows)
 	})
 
+	// Board price sum (intraday, from board_rt.price):
+	// GET /api/history/board_price_sum?type=industry|concept&fid=f62&limit=1200
+	mux.HandleFunc("/api/history/board_price_sum", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		tp := r.URL.Query().Get("type")
+		if tp == "" {
+			tp = "industry"
+		}
+		if tp != "industry" && tp != "concept" {
+			tp = "industry"
+		}
+		fid := r.URL.Query().Get("fid")
+		if fid == "" {
+			fid = "f62"
+		}
+		limit := parseLimit(r.URL.Query().Get("limit"), 1200, 5000)
+
+		loc, _ := time.LoadLocation("Asia/Shanghai")
+		now := time.Now().In(loc)
+		start := time.Date(now.Year(), now.Month(), now.Day(), 9, 30, 0, 0, loc).UTC()
+		end := time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, loc).UTC()
+		rows, err := sqlite.QueryBoardPriceSumRT(db, tp, fid, sqlite.FixedRFC3339Nano(start), sqlite.FixedRFC3339Nano(end), limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
 	// Board list from in-memory snapshot:
 	// GET /api/boards?type=industry|concept&fid=f62&limit=50
 	mux.HandleFunc("/api/boards", func(w http.ResponseWriter, r *http.Request) {
@@ -217,9 +250,21 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 				fid = "f62"
 			}
 		}
+		refresh := r.URL.Query().Get("refresh") == "1" || strings.EqualFold(r.URL.Query().Get("refresh"), "true")
+		now := time.Now()
+		interval := time.Duration(bcfg.IntervalSeconds) * time.Second
+		if interval <= 0 {
+			interval = 60 * time.Second
+		}
+		stale := true
+		if ts := mem.BoardTS(tp, fid); !ts.IsZero() {
+			if now.Sub(ts) <= 2*interval {
+				stale = false
+			}
+		}
 
 		rows := []eastmoney.TopItem(nil)
-		if !market.IsCNTradingTime(time.Now()) {
+		if !market.IsCNTradingTime(now) {
 			if _, dbRows, err := sqlite.QueryBoardRTLatest(db, tp, fid, limit); err == nil && len(dbRows) > 0 {
 				rows = dbRows
 			}
@@ -235,7 +280,8 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			}
 		}
 		fromLive := false
-		if len(rows) == 0 && bcfg.Enabled && bcfg.FS != "" {
+		allowLive := bcfg.Enabled && bcfg.FS != "" && (refresh || market.IsCNTradingTime(now))
+		if (len(rows) == 0 || stale) && allowLive {
 			var items []eastmoney.TopItem
 			var err error
 			if tp == "concept" && !bcfg.CollectAll {
@@ -487,10 +533,42 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 				}
 			}
 		}
-		start := time.Date(trendDay.Year(), trendDay.Month(), trendDay.Day(), 9, 0, 0, 0, loc).UTC()
+		start := time.Date(trendDay.Year(), trendDay.Month(), trendDay.Day(), 9, 30, 0, 0, loc).UTC()
 		end := time.Date(trendDay.Year(), trendDay.Month(), trendDay.Day(), 15, 0, 0, 0, loc).UTC()
 		rows, err := sqlite.QueryBoardRTSeriesByCode(db, board, sqlite.FixedRFC3339Nano(start), sqlite.FixedRFC3339Nano(end), 1200)
 		if err == nil && len(rows) >= 2 {
+			// Some board types (notably concept) may have a stale/flat "price" in clist snapshots.
+			// If the intraday series looks stale (flat or too few distinct values), prefer the dedicated trend endpoint.
+			minV, maxV := rows[0].Value, rows[0].Value
+			distinct := make(map[int64]struct{}, 64)
+			flatRun, maxFlatRun := 1, 1
+			last := rows[0].Value
+			// Quantize to 1e-4 to avoid floating noise.
+			distinct[int64(last*1e4+0.5)] = struct{}{}
+			for i := 1; i < len(rows); i++ {
+				v := rows[i].Value
+				if v < minV {
+					minV = v
+				}
+				if v > maxV {
+					maxV = v
+				}
+				distinct[int64(v*1e4+0.5)] = struct{}{}
+				if v == last {
+					flatRun++
+					if flatRun > maxFlatRun {
+						maxFlatRun = flatRun
+					}
+				} else {
+					flatRun = 1
+					last = v
+				}
+			}
+			// Heuristics for "stale": essentially flat, or step function with very few distinct values,
+			// or an excessively long flat run (e.g. clist snapshots not updating).
+			if (maxV-minV) < 1e-9 || len(distinct) <= 6 || maxFlatRun >= 30 {
+				goto fetchFromRemote
+			}
 			points := make([]eastmoney.TrendPoint, 0, len(rows))
 			for _, r := range rows {
 				if ts, err := time.Parse(time.RFC3339Nano, r.TSUTC); err == nil {
@@ -502,6 +580,7 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			return
 		}
 
+	fetchFromRemote:
 		points, err := em.BoardTrends1D(r.Context(), board)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "board": board})
@@ -534,6 +613,31 @@ func newWebServer(mgr *runtimecfg.Manager, db *sql.DB, mem *memstore.Store) http
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"code": code, "secid": secid, "points": points, "ts_utc": time.Now().UTC()})
+	})
+
+	// SecID intraday trend (today):
+	// GET /api/secid/trend?secid=1.000001
+	mux.HandleFunc("/api/secid/trend", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		secid := strings.TrimSpace(r.URL.Query().Get("secid"))
+		if secid == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "secid is required (e.g. 1.000001)"})
+			return
+		}
+		if cached, ok := secidTrendCache.Get(secid); ok {
+			writeJSON(w, http.StatusOK, map[string]any{"secid": secid, "points": cached.points, "ts_utc": cached.tsUTC, "cached": true})
+			return
+		}
+		points, err := em.StockTrends1D(r.Context(), secid)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "secid": secid})
+			return
+		}
+		secidTrendCache.Set(secid, points)
+		writeJSON(w, http.StatusOK, map[string]any{"secid": secid, "points": points, "ts_utc": time.Now().UTC()})
 	})
 
 	// Static UI.
